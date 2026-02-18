@@ -245,6 +245,42 @@ body {
   padding: 10px;
 }
 
+.full-script-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 320px) 1fr;
+  gap: 10px;
+}
+
+.full-script-scene-list {
+  max-height: 70vh;
+  overflow: auto;
+  display: grid;
+  gap: 6px;
+}
+
+.full-script-detail {
+  border: 1px solid #d3dbe6;
+  border-radius: 8px;
+  background: #f8fbff;
+  padding: 10px;
+}
+
+.full-script-detail p {
+  margin: 4px 0;
+}
+
+.full-script-scene-text {
+  white-space: pre;
+  overflow: auto;
+  tab-size: 4;
+  max-height: 46vh;
+  border: 1px solid #cfd8e8;
+  background: #ffffff;
+  border-radius: 6px;
+  padding: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
 .report-placeholder {
   margin-bottom: 10px;
   padding: 8px 10px;
@@ -434,6 +470,10 @@ body {
   }
 
   .entity-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .full-script-layout {
     grid-template-columns: 1fr;
   }
 }
