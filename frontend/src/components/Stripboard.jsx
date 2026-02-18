@@ -1,54 +1,97 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 const UNSCHEDULED_DAY = "Unscheduled";
+const TIME_OPTIONS = ["DAY", "NIGHT", "DAWN", "DUSK", "MORNING", "EVENING", "SUNRISE", "SUNSET"];
+const INT_EXT_OPTIONS = ["INT", "EXT", "INT/EXT"];
+
+function createStripId(prefix = "scene") {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function formatPageEighths(totalEighths) {
+  const safeTotal = Number.isFinite(totalEighths) ? Math.max(0, totalEighths) : 0;
+  const whole = Math.floor(safeTotal / 8);
+  const eighths = safeTotal % 8;
+  return `${whole} ${eighths}/8`;
+}
+
+function parseList(value) {
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function getDayTotalEighths(strips = []) {
+  return strips.reduce((total, strip) => total + (Number.isFinite(strip.pageEighths) ? strip.pageEighths : 0), 0);
+}
+
+function getStripStyle(strip, colorMode) {
+  if (colorMode === "none") {
+    return {};
+  }
+
+  const time = String(strip.timeOfDay || "").toUpperCase();
+  const intExt = String(strip.intExt || "").toUpperCase();
+
+  if (colorMode === "dayNight") {
+    if (time === "NIGHT") {
+      return { backgroundColor: "#3352a1", color: "#ffffff", borderColor: "#22366f" };
+    }
+    if (["DAWN", "DUSK", "SUNRISE", "SUNSET"].includes(time)) {
+      return { backgroundColor: "#e17de8", color: "#202020", borderColor: "#b95cc0" };
+    }
+    return { backgroundColor: "#efe655", color: "#111111", borderColor: "#b8ad1f" };
+  }
+
+  if (colorMode === "intExt") {
+    if (intExt === "EXT") {
+      return { backgroundColor: "#1b9b53", color: "#ffffff", borderColor: "#0f6737" };
+    }
+    if (intExt === "INT/EXT") {
+      return { backgroundColor: "#a1632f", color: "#ffffff", borderColor: "#77451f" };
+    }
+    return { backgroundColor: "#d8dde7", color: "#1a1a1a", borderColor: "#aeb7ca" };
+  }
+
+  return {};
+}
+
+function toDraft(strip, day) {
+  const totalEighths = Number.isFinite(strip?.pageEighths) ? strip.pageEighths : 1;
+  return {
+    id: strip?.id ?? null,
+    sourceDay: day || UNSCHEDULED_DAY,
+    sceneNumber: String(strip?.sceneNumber ?? ""),
+    heading: strip?.heading ?? "",
+    location: strip?.location ?? "",
+    cast: (strip?.cast ?? []).join(", "),
+    props: (strip?.props ?? []).join(", "),
+    wardrobe: (strip?.wardrobe ?? []).join(", "),
+    scriptText: strip?.scriptText ?? "",
+    notes: strip?.notes ?? "",
+    day: day || UNSCHEDULED_DAY,
+    needsReview: Boolean(strip?.needsReview),
+    intExt: strip?.intExt || "INT",
+    timeOfDay: strip?.timeOfDay || "DAY",
+    pageWhole: String(Math.floor(totalEighths / 8)),
+    pageEighths: String(totalEighths % 8),
+  };
+}
 
 export function Stripboard({ days, setDays, stripsByDay, setStripsByDay }) {
   const [dragged, setDragged] = useState(null);
   const [selectedStripIds, setSelectedStripIds] = useState(new Set());
+  const [colorMode, setColorMode] = useState("dayNight");
   const [editorTarget, setEditorTarget] = useState(null);
-  const [editorDraft, setEditorDraft] = useState(null);
-  const [manualScene, setManualScene] = useState({
-    sceneNumber: "",
-    heading: "",
-    location: "",
-    cast: "",
-    day: UNSCHEDULED_DAY,
-    needsReview: false,
-  });
+  const [draft, setDraft] = useState(toDraft(null, UNSCHEDULED_DAY));
 
   const stripCount = useMemo(
     () => Object.values(stripsByDay).reduce((count, dayStrips) => count + dayStrips.length, 0),
     [stripsByDay]
   );
-  const activeStrip = useMemo(() => {
-    if (!editorTarget) {
-      return null;
-    }
-    return (stripsByDay[editorTarget.day] ?? []).find((strip) => strip.id === editorTarget.id) ?? null;
-  }, [editorTarget, stripsByDay]);
 
-  useEffect(() => {
-    if (!activeStrip) {
-      setEditorDraft(null);
-      return;
-    }
-
-    setEditorDraft({
-      sceneNumber: String(activeStrip.sceneNumber ?? ""),
-      heading: activeStrip.heading ?? "",
-      location: activeStrip.location ?? "",
-      cast: (activeStrip.cast ?? []).join(", "),
-      day: editorTarget.day,
-      needsReview: Boolean(activeStrip.needsReview),
-    });
-  }, [activeStrip, editorTarget]);
-
-  function parseCast(rawCast) {
-    return rawCast
-      .split(",")
-      .map((member) => member.trim())
-      .filter(Boolean);
-  }
+  const shootingDays = useMemo(() => days.filter((day) => day !== UNSCHEDULED_DAY), [days]);
 
   function onDrop(targetDay) {
     if (!dragged) {
@@ -57,15 +100,20 @@ export function Stripboard({ days, setDays, stripsByDay, setStripsByDay }) {
 
     setStripsByDay((prev) => {
       const next = Object.fromEntries(Object.entries(prev).map(([day, strips]) => [day, [...strips]]));
-      const source = next[dragged.day].find((strip) => strip.id === dragged.id);
+      const source = (next[dragged.day] ?? []).find((strip) => strip.id === dragged.id);
       if (!source) {
         return prev;
       }
 
-      next[dragged.day] = next[dragged.day].filter((strip) => strip.id !== dragged.id);
-      next[targetDay].push(source);
+      next[dragged.day] = (next[dragged.day] ?? []).filter((strip) => strip.id !== dragged.id);
+      next[targetDay] = [...(next[targetDay] ?? []), source];
       return next;
     });
+
+    if (editorTarget?.id === dragged.id) {
+      setEditorTarget({ id: dragged.id, day: targetDay });
+      setDraft((prev) => ({ ...prev, sourceDay: targetDay, day: targetDay }));
+    }
 
     setDragged(null);
   }
@@ -92,8 +140,7 @@ export function Stripboard({ days, setDays, stripsByDay, setStripsByDay }) {
       const moving = [];
 
       for (const day of days) {
-        const dayStrips = next[day] ?? [];
-        next[day] = dayStrips.filter((strip) => {
+        next[day] = (next[day] ?? []).filter((strip) => {
           if (selectedStripIds.has(strip.id)) {
             moving.push(strip);
             return false;
@@ -102,7 +149,7 @@ export function Stripboard({ days, setDays, stripsByDay, setStripsByDay }) {
         });
       }
 
-      next[targetDay].push(...moving);
+      next[targetDay] = [...(next[targetDay] ?? []), ...moving];
       return next;
     });
 
@@ -110,16 +157,13 @@ export function Stripboard({ days, setDays, stripsByDay, setStripsByDay }) {
   }
 
   function addDay() {
-    const scheduledDays = days.filter((day) => day !== UNSCHEDULED_DAY);
-    const nextDayName = `Day ${scheduledDays.length + 1}`;
+    const nextDayName = `Day ${shootingDays.length + 1}`;
 
     setDays((prev) => {
       if (prev.includes(nextDayName)) {
         return prev;
       }
-
-      const withoutUnscheduled = prev.filter((day) => day !== UNSCHEDULED_DAY);
-      return [...withoutUnscheduled, nextDayName, UNSCHEDULED_DAY];
+      return [UNSCHEDULED_DAY, ...prev.filter((day) => day !== UNSCHEDULED_DAY), nextDayName];
     });
 
     setStripsByDay((prev) => {
@@ -130,94 +174,137 @@ export function Stripboard({ days, setDays, stripsByDay, setStripsByDay }) {
     });
   }
 
-  function addManualScene(event) {
-    event.preventDefault();
+  function selectStrip(strip, day) {
+    setEditorTarget({ id: strip.id, day });
+    setDraft(toDraft(strip, day));
+  }
 
-    const heading = manualScene.heading.trim();
-    const location = manualScene.location.trim();
+  function resetForNew() {
+    setEditorTarget(null);
+    setDraft(toDraft(null, UNSCHEDULED_DAY));
+  }
+
+  function buildStripFromDraft() {
+    const heading = draft.heading.trim();
+    const location = draft.location.trim();
     if (!heading || !location) {
-      return;
+      return null;
     }
 
-    const cast = parseCast(manualScene.cast);
-    const fallbackSceneNumber = stripCount + 1;
-    const numericSceneNumber = Number.parseInt(manualScene.sceneNumber, 10);
-    const sceneNumber = Number.isNaN(numericSceneNumber) ? fallbackSceneNumber : numericSceneNumber;
-    const nextDay = days.includes(manualScene.day) ? manualScene.day : UNSCHEDULED_DAY;
+    const numericSceneNumber = Number.parseInt(draft.sceneNumber, 10);
+    const sceneNumber = Number.isNaN(numericSceneNumber) ? stripCount + 1 : numericSceneNumber;
+    const whole = Math.max(0, Number.parseInt(draft.pageWhole, 10) || 0);
+    const eighths = Math.min(7, Math.max(0, Number.parseInt(draft.pageEighths, 10) || 0));
 
-    const newStrip = {
-      id: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    return {
+      id: draft.id || createStripId("scene"),
       sceneNumber,
       heading,
       location,
-      cast,
-      needsReview: manualScene.needsReview,
+      cast: parseList(draft.cast),
+      props: parseList(draft.props),
+      wardrobe: parseList(draft.wardrobe),
+      scriptText: draft.scriptText,
+      notes: draft.notes,
+      needsReview: draft.needsReview,
+      intExt: draft.intExt,
+      timeOfDay: draft.timeOfDay,
+      pageEighths: whole * 8 + eighths,
     };
+  }
+
+  function saveNewScene() {
+    const strip = buildStripFromDraft();
+    if (!strip) {
+      return;
+    }
+
+    const targetDay = days.includes(draft.day) ? draft.day : UNSCHEDULED_DAY;
+    strip.id = createStripId("manual");
 
     setStripsByDay((prev) => ({
       ...prev,
-      [nextDay]: [...(prev[nextDay] ?? []), newStrip],
+      [targetDay]: [...(prev[targetDay] ?? []), strip],
     }));
 
-    setManualScene({
-      sceneNumber: "",
-      heading: "",
-      location: "",
-      cast: "",
-      day: nextDay,
-      needsReview: false,
-    });
+    setEditorTarget({ id: strip.id, day: targetDay });
+    setDraft(toDraft(strip, targetDay));
   }
 
-  function saveSceneEdits(event) {
-    event.preventDefault();
-    if (!editorTarget || !editorDraft) {
+  function updateScene() {
+    if (!editorTarget?.id) {
       return;
     }
 
-    const heading = editorDraft.heading.trim();
-    const location = editorDraft.location.trim();
-    if (!heading || !location) {
+    const strip = buildStripFromDraft();
+    if (!strip) {
       return;
     }
 
-    const cast = parseCast(editorDraft.cast);
-    const numericSceneNumber = Number.parseInt(editorDraft.sceneNumber, 10);
-    const hasValidSceneNumber = !Number.isNaN(numericSceneNumber);
-    const destinationDay = days.includes(editorDraft.day) ? editorDraft.day : editorTarget.day;
+    const destinationDay = days.includes(draft.day) ? draft.day : editorTarget.day;
+    strip.id = editorTarget.id;
 
     setStripsByDay((prev) => {
       const next = Object.fromEntries(Object.entries(prev).map(([day, strips]) => [day, [...strips]]));
-      let stripToUpdate = null;
-      let currentDay = editorTarget.day;
-
       for (const day of Object.keys(next)) {
-        const found = next[day].find((strip) => strip.id === editorTarget.id);
-        if (found) {
-          stripToUpdate = found;
-          currentDay = day;
-          break;
-        }
+        next[day] = next[day].filter((item) => item.id !== editorTarget.id);
       }
-
-      if (!stripToUpdate) {
-        return prev;
-      }
-
-      next[currentDay] = next[currentDay].filter((strip) => strip.id !== editorTarget.id);
-      next[destinationDay].push({
-        ...stripToUpdate,
-        sceneNumber: hasValidSceneNumber ? numericSceneNumber : stripToUpdate.sceneNumber,
-        heading,
-        location,
-        cast,
-        needsReview: editorDraft.needsReview,
-      });
-
+      next[destinationDay] = [...(next[destinationDay] ?? []), strip];
       return next;
     });
 
-    setEditorTarget({ id: editorTarget.id, day: destinationDay });
+    setEditorTarget({ id: strip.id, day: destinationDay });
+    setDraft(toDraft(strip, destinationDay));
+  }
+
+  function duplicateScene() {
+    const strip = buildStripFromDraft();
+    if (!strip) {
+      return;
+    }
+
+    const targetDay = days.includes(draft.day) ? draft.day : UNSCHEDULED_DAY;
+    strip.id = createStripId("dup");
+
+    setStripsByDay((prev) => ({
+      ...prev,
+      [targetDay]: [...(prev[targetDay] ?? []), strip],
+    }));
+
+    setEditorTarget({ id: strip.id, day: targetDay });
+    setDraft(toDraft(strip, targetDay));
+  }
+
+  function renderStrip(strip, day) {
+    const selected = selectedStripIds.has(strip.id);
+    const stripStyle = getStripStyle(strip, colorMode);
+
+    return (
+      <article
+        key={strip.id}
+        className={`strip ${selected ? "selected" : ""} ${editorTarget?.id === strip.id ? "editing" : ""}`}
+        draggable
+        style={stripStyle}
+        onDragStart={() => setDragged({ id: strip.id, day })}
+        onClick={() => selectStrip(strip, day)}
+      >
+        <label onClick={(event) => event.stopPropagation()}>
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={() => toggleSelect(strip.id)}
+            onClick={(event) => event.stopPropagation()}
+          />{" "}
+          Select
+        </label>
+        <h4>Scene {strip.sceneNumber}</h4>
+        <p className="strip-meta">{formatPageEighths(strip.pageEighths)} pgs | {strip.intExt} | {strip.timeOfDay}</p>
+        <p>{strip.heading}</p>
+        <p><strong>Set:</strong> {strip.location}</p>
+        <p><strong>Cast:</strong> {(strip.cast ?? []).length ? strip.cast.join(", ") : "Unresolved"}</p>
+        {strip.needsReview ? <span className="flag">Needs Review</span> : null}
+      </article>
+    );
   }
 
   return (
@@ -225,9 +312,15 @@ export function Stripboard({ days, setDays, stripsByDay, setStripsByDay }) {
       <div className="toolbar">
         <span>Total strips: {stripCount}</span>
         <span>Selected: {selectedStripIds.size}</span>
-        <button type="button" className="add-day-button" onClick={addDay}>
-          Add Day
-        </button>
+        <label className="inline-control">
+          Color Mode
+          <select value={colorMode} onChange={(event) => setColorMode(event.target.value)}>
+            <option value="dayNight">Day/Night</option>
+            <option value="intExt">INT/EXT</option>
+            <option value="none">None</option>
+          </select>
+        </label>
+        <button type="button" className="add-day-button" onClick={addDay}>Add Day</button>
         {days.map((day) => (
           <button key={day} type="button" onClick={() => bulkMove(day)}>
             Move Selected to {day}
@@ -235,162 +328,117 @@ export function Stripboard({ days, setDays, stripsByDay, setStripsByDay }) {
         ))}
       </div>
 
-      <form className="manual-scene-form" onSubmit={addManualScene}>
-        <h3>Manual Scene Entry</h3>
-        <input
-          type="text"
-          placeholder="Scene Number"
-          value={manualScene.sceneNumber}
-          onChange={(event) => setManualScene((prev) => ({ ...prev, sceneNumber: event.target.value }))}
-        />
-        <input
-          type="text"
-          placeholder="Heading (required)"
-          value={manualScene.heading}
-          onChange={(event) => setManualScene((prev) => ({ ...prev, heading: event.target.value }))}
-        />
-        <input
-          type="text"
-          placeholder="Location (required)"
-          value={manualScene.location}
-          onChange={(event) => setManualScene((prev) => ({ ...prev, location: event.target.value }))}
-        />
-        <input
-          type="text"
-          placeholder="Cast (comma separated)"
-          value={manualScene.cast}
-          onChange={(event) => setManualScene((prev) => ({ ...prev, cast: event.target.value }))}
-        />
-        <select
-          value={manualScene.day}
-          onChange={(event) => setManualScene((prev) => ({ ...prev, day: event.target.value }))}
-        >
-          {days.map((day) => (
-            <option key={day} value={day}>
-              {day}
-            </option>
-          ))}
-        </select>
-        <label className="inline-check">
-          <input
-            type="checkbox"
-            checked={manualScene.needsReview}
-            onChange={(event) => setManualScene((prev) => ({ ...prev, needsReview: event.target.checked }))}
-          />
-          Needs Review
-        </label>
-        <button type="submit">Add Scene</button>
-      </form>
-
-      <div className="stripboard-layout">
-        <div className="board">
-        {days.map((day) => (
-          <section
-            key={day}
-            className="column"
-            onDragOver={(event) => event.preventDefault()}
-            onDrop={() => onDrop(day)}
-          >
-            <h3>{day}</h3>
-            {(stripsByDay[day] ?? []).map((strip) => {
-              const selected = selectedStripIds.has(strip.id);
-              return (
-                <article
-                  key={strip.id}
-                  className={`strip ${selected ? "selected" : ""} ${editorTarget?.id === strip.id ? "editing" : ""}`}
-                  draggable
-                  onDragStart={() => setDragged({ id: strip.id, day })}
-                  onClick={() => setEditorTarget({ id: strip.id, day })}
-                >
-                  <label onClick={(event) => event.stopPropagation()}>
-                    <input
-                      type="checkbox"
-                      checked={selected}
-                      onChange={() => toggleSelect(strip.id)}
-                      onClick={(event) => event.stopPropagation()}
-                    />{" "}
-                    Select
-                  </label>
-                  <h4>Scene {strip.sceneNumber}</h4>
-                  <p>{strip.heading}</p>
-                  <p><strong>Location:</strong> {strip.location}</p>
-                  <p><strong>Cast:</strong> {strip.cast.length ? strip.cast.join(", ") : "Unresolved"}</p>
-                  {strip.needsReview ? <span className="flag">Needs Review</span> : null}
-                </article>
-              );
-            })}
-          </section>
-        ))}
-        </div>
-
-        <aside className="scene-editor">
-          <h3>Scene Editor</h3>
-          {!editorDraft ? (
-            <p>Select a scene strip to review and edit details.</p>
-          ) : (
-            <form onSubmit={saveSceneEdits}>
+      <section className="scene-editor">
+        <h3>Scene Workbench</h3>
+        <form onSubmit={(event) => event.preventDefault()}>
+          <div className="editor-actions">
+            <button type="button" onClick={updateScene} disabled={!editorTarget}>Update</button>
+            <button type="button" onClick={saveNewScene}>New</button>
+            <button type="button" onClick={duplicateScene}>Duplicate</button>
+            <button type="button" onClick={resetForNew}>Clear</button>
+          </div>
+          <div className="editor-row-primary">
+            <label className="field-scene-number">
+              Scene Number
+              <input type="text" value={draft.sceneNumber} onChange={(event) => setDraft((prev) => ({ ...prev, sceneNumber: event.target.value }))} />
+            </label>
+            <label className="field-int-ext">
+              INT/EXT
+              <select value={draft.intExt} onChange={(event) => setDraft((prev) => ({ ...prev, intExt: event.target.value }))}>
+                {INT_EXT_OPTIONS.map((option) => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field-time-of-day">
+              Time of Day
+              <select value={draft.timeOfDay} onChange={(event) => setDraft((prev) => ({ ...prev, timeOfDay: event.target.value }))}>
+                {TIME_OPTIONS.map((option) => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field-heading">
+              Heading
+              <input type="text" value={draft.heading} onChange={(event) => setDraft((prev) => ({ ...prev, heading: event.target.value }))} />
+            </label>
+          </div>
+          <div className="editor-row-secondary">
+            <label>
+              Location (Set)
+              <input type="text" value={draft.location} onChange={(event) => setDraft((prev) => ({ ...prev, location: event.target.value }))} />
+            </label>
+            <div className="editor-grid-pages">
               <label>
-                Scene Number
-                <input
-                  type="text"
-                  value={editorDraft.sceneNumber}
-                  onChange={(event) => setEditorDraft((prev) => ({ ...prev, sceneNumber: event.target.value }))}
-                />
+                Whole Pages
+                <input type="number" min="0" value={draft.pageWhole} onChange={(event) => setDraft((prev) => ({ ...prev, pageWhole: event.target.value }))} />
               </label>
               <label>
-                Heading
-                <input
-                  type="text"
-                  value={editorDraft.heading}
-                  onChange={(event) => setEditorDraft((prev) => ({ ...prev, heading: event.target.value }))}
-                />
-              </label>
-              <label>
-                Location
-                <input
-                  type="text"
-                  value={editorDraft.location}
-                  onChange={(event) => setEditorDraft((prev) => ({ ...prev, location: event.target.value }))}
-                />
-              </label>
-              <label>
-                Cast (comma separated)
-                <input
-                  type="text"
-                  value={editorDraft.cast}
-                  onChange={(event) => setEditorDraft((prev) => ({ ...prev, cast: event.target.value }))}
-                />
-              </label>
-              <label>
-                Scheduled Day
-                <select
-                  value={editorDraft.day}
-                  onChange={(event) => setEditorDraft((prev) => ({ ...prev, day: event.target.value }))}
-                >
-                  {days.map((day) => (
-                    <option key={day} value={day}>
-                      {day}
-                    </option>
+                8ths
+                <select value={draft.pageEighths} onChange={(event) => setDraft((prev) => ({ ...prev, pageEighths: event.target.value }))}>
+                  {Array.from({ length: 8 }, (_, index) => (
+                    <option key={index} value={String(index)}>{index}/8</option>
                   ))}
                 </select>
               </label>
-              <label className="inline-check">
-                <input
-                  type="checkbox"
-                  checked={editorDraft.needsReview}
-                  onChange={(event) => setEditorDraft((prev) => ({ ...prev, needsReview: event.target.checked }))}
-                />
-                Needs Review
-              </label>
-              <div className="editor-actions">
-                <button type="submit">Save Scene</button>
-                <button type="button" onClick={() => setEditorTarget(null)}>
-                  Close
-                </button>
-              </div>
-            </form>
-          )}
-        </aside>
+            </div>
+            <label>
+              Scheduled Day
+              <select value={draft.day} onChange={(event) => setDraft((prev) => ({ ...prev, day: event.target.value }))}>
+                {days.map((day) => (
+                  <option key={day} value={day}>{day}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="editor-row-secondary">
+            <label>
+              Cast (comma separated)
+              <input type="text" value={draft.cast} onChange={(event) => setDraft((prev) => ({ ...prev, cast: event.target.value }))} />
+            </label>
+            <label>
+              Props (comma separated)
+              <input type="text" value={draft.props} onChange={(event) => setDraft((prev) => ({ ...prev, props: event.target.value }))} />
+            </label>
+            <label>
+              Wardrobe (comma separated)
+              <input type="text" value={draft.wardrobe} onChange={(event) => setDraft((prev) => ({ ...prev, wardrobe: event.target.value }))} />
+            </label>
+          </div>
+          <label>
+            Script Text
+            <textarea className="script-text-area" rows={4} value={draft.scriptText} onChange={(event) => setDraft((prev) => ({ ...prev, scriptText: event.target.value }))} />
+          </label>
+          <label>
+            Notes
+            <textarea value={draft.notes} onChange={(event) => setDraft((prev) => ({ ...prev, notes: event.target.value }))} />
+          </label>
+          <label className="inline-check">
+            <input type="checkbox" checked={draft.needsReview} onChange={(event) => setDraft((prev) => ({ ...prev, needsReview: event.target.checked }))} />
+            Needs Review
+          </label>
+        </form>
+      </section>
+
+      <div className="stripboard-layout">
+        <div className="board-shell">
+          <section className="column unscheduled-column" onDragOver={(event) => event.preventDefault()} onDrop={() => onDrop(UNSCHEDULED_DAY)}>
+            <h3>{UNSCHEDULED_DAY} <span className="day-total">{formatPageEighths(getDayTotalEighths(stripsByDay[UNSCHEDULED_DAY] ?? []))} pages</span></h3>
+            {(stripsByDay[UNSCHEDULED_DAY] ?? []).map((strip) => renderStrip(strip, UNSCHEDULED_DAY))}
+          </section>
+
+          <div className="shooting-days-stack">
+            {shootingDays.map((day) => {
+              const dayStrips = stripsByDay[day] ?? [];
+              return (
+                <section key={day} className="column shooting-day-column" onDragOver={(event) => event.preventDefault()} onDrop={() => onDrop(day)}>
+                  <h3>{day} <span className="day-total">{formatPageEighths(getDayTotalEighths(dayStrips))} pages</span></h3>
+                  {dayStrips.map((strip) => renderStrip(strip, day))}
+                </section>
+              );
+            })}
+          </div>
+        </div>
       </div>
     </div>
   );

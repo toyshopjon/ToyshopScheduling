@@ -22,6 +22,7 @@ class Scene:
     location: str
     time_of_day: str
     cast: list[str]
+    scene_text: str
     confidence: float
     needs_review: bool
 
@@ -42,30 +43,53 @@ class ScriptParser:
         return "\n".join(pages)
 
     def _split_into_scenes(self, text: str) -> list[Scene]:
-        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        lines = text.splitlines()
         scenes: list[Scene] = []
 
         active_heading = ""
         active_location = ""
         active_time = ""
         cast: set[str] = set()
+        scene_lines: list[str] = []
 
-        for line in lines:
-            heading_match = SCENE_HEADING_PATTERN.match(line)
+        for raw_line in lines:
+            stripped_line = raw_line.strip()
+            heading_match = SCENE_HEADING_PATTERN.match(stripped_line)
             if heading_match:
                 if active_heading:
-                    scenes.append(self._make_scene(len(scenes) + 1, active_heading, active_location, active_time, cast))
-                active_heading = line
+                    scenes.append(
+                        self._make_scene(
+                            len(scenes) + 1,
+                            active_heading,
+                            active_location,
+                            active_time,
+                            cast,
+                            scene_lines,
+                        )
+                    )
+                active_heading = stripped_line
                 active_location = heading_match.group("location").strip().upper()
                 active_time = heading_match.group("time").strip().upper()
                 cast = set()
+                scene_lines = [raw_line.rstrip()]
                 continue
 
-            if active_heading and CHARACTER_CUE_PATTERN.match(line):
-                cast.add(line.strip())
+            if active_heading:
+                scene_lines.append(raw_line.rstrip())
+                if stripped_line and CHARACTER_CUE_PATTERN.match(stripped_line):
+                    cast.add(stripped_line)
 
         if active_heading:
-            scenes.append(self._make_scene(len(scenes) + 1, active_heading, active_location, active_time, cast))
+            scenes.append(
+                self._make_scene(
+                    len(scenes) + 1,
+                    active_heading,
+                    active_location,
+                    active_time,
+                    cast,
+                    scene_lines,
+                )
+            )
 
         return scenes
 
@@ -76,15 +100,18 @@ class ScriptParser:
         location: str,
         time_of_day: str,
         cast: set[str],
+        scene_lines: list[str],
     ) -> Scene:
         confidence = 0.95 if cast else 0.78
         needs_review = not cast
+        scene_text = "\n".join(scene_lines).strip()
         return Scene(
             number=number,
             heading=heading,
             location=location,
             time_of_day=time_of_day,
             cast=sorted(cast),
+            scene_text=scene_text,
             confidence=confidence,
             needs_review=needs_review,
         )
@@ -96,6 +123,7 @@ class ScriptParser:
             "location": scene.location,
             "time_of_day": scene.time_of_day,
             "cast": scene.cast,
+            "scene_text": scene.scene_text,
             "confidence": scene.confidence,
             "needs_review": scene.needs_review,
         }
