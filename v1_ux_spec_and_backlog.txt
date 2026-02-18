@@ -1,0 +1,111 @@
+V1 UX Spec
+Goal: Line producer gets from PDF upload to a usable draft schedule in under 30 minutes for a feature script.
+
+1. Primary user
+- Line producer (power user, time-constrained, accuracy-sensitive).
+- Secondary: 1st AD (review/edit), coordinator (export/reporting).
+
+2. Core flow
+1. Upload script PDF.
+2. Auto-parse scenes + auto-breakdown (target 95%).
+3. Review queue for low-confidence items and unresolved aliases.
+4. Generate scheduling draft optimized for location grouping + actor availability.
+5. Use stripboard to multi-select and bulk move/override.
+6. Export PDF stripboard and CSV.
+
+3. Information architecture (screens)
+1. Import & Parse
+- Drag/drop PDF.
+- Parse progress + detected scene count.
+- Parsing issues panel (missing scene headers, malformed pages).
+
+2. Breakdown Review
+- Scene list with confidence badges.
+- Needs Review queue only (confirm-by-exception default).
+- Alias manager (e.g., JON SMITH = JON).
+- Scene detail pane with detected cast/props/location/day-night/effects.
+- One-click Approve Scene and Approve All High Confidence.
+
+3. Schedule Builder (Stripboard)
+- Multi-view toggle:
+  - Day view (classic stripboard)
+  - Location view (clustered by location)
+  - Cast view (actor workload/availability lens)
+- Drag/drop strips across days.
+- Multi-select + bulk actions (move, lock, assign unit/day-night/location tag).
+- Conflict panel (actor unavailable, location split inefficiency, day/night mismatch).
+- Optimizer button: Suggest Best Order (never silently auto-apply).
+
+4. Export
+- PDF stripboard export preview.
+- CSV export with selectable schema preset.
+- Export history.
+
+4. Key UX rules
+1. Confidence handling
+- High confidence auto-approved but still visible.
+- Low confidence goes to review queue.
+- Any alias uncertainty blocks final approval for affected scenes.
+
+2. Identity resolution
+- Rule-based matching first (exact, normalized name, alias table).
+- AI fallback for ambiguous mentions.
+- Global alias correction applies instantly across project.
+- Action-line presence counts as in scene even if no dialogue.
+
+3. Scheduling logic
+- Priority 1: location grouping.
+- Priority 2: actor availability.
+- Soft constraints: minimize company moves, keep day/night continuity.
+- Manual override always allowed; conflicts downgraded to warnings when overridden.
+
+4. Bulk editing
+- Shift-click/checkbox multi-select.
+- Required bulk actions in v1:
+  - Move to day
+  - Lock/unlock strips
+  - Assign location cluster
+  - Assign unit
+  - Mark day/night
+- Full undo/redo stack (minimum 20 actions).
+
+5. State model (UI states)
+1. Parse states: idle, uploading, parsing, parsed_with_warnings, failed.
+2. Breakdown states per scene: unreviewed, high_confidence, needs_review, approved, overridden.
+3. Strip states: unscheduled, scheduled, locked, conflict.
+4. Optimizer states: ready, running, draft_ready, applied, discarded.
+
+6. Success metrics for v1
+1. 95%+ element extraction precision on test scripts.
+2. 80%+ scenes auto-approved without manual edits.
+3. < 30 min from upload to first usable schedule.
+4. < 10 manual corrections per 100 scenes after alias setup.
+
+Prioritized Backlog
+
+1. P0 (must-have)
+1. PDF upload + parser for scene boundaries.
+2. Breakdown extraction (cast, location, day/night, key elements).
+3. Confidence scoring + Needs Review queue.
+4. Alias manager with global apply.
+5. Stripboard day view with drag/drop.
+6. Multi-select + bulk move.
+7. Optimizer suggestion pass (location + actor availability).
+8. Manual override + conflict warnings.
+9. PDF and CSV export.
+
+2. P1 (should-have)
+1. Location view + cast view.
+2. Undo/redo history.
+3. Lock strips and protected constraints.
+4. Export templates for different CSV targets.
+5. Audit log of schedule changes.
+
+3. P2 (nice-to-have)
+1. Collaboration roles (editor/viewer/approver).
+2. Version snapshots and compare.
+3. Learned alias/element suggestions across projects.
+4. Call-sheet starter export.
+
+Next step option
+If you want, next step is a clickable wireframe spec (screen-by-screen components and interaction copy) you can hand directly to design/engineering.
