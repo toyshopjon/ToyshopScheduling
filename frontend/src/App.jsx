@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ParseUploader } from "./components/ParseUploader";
 import { Stripboard } from "./components/Stripboard";
 
@@ -43,6 +43,23 @@ function inferTimeOfDay(heading, parserTimeOfDay) {
     }
   }
   return "DAY";
+}
+
+function estimateVisualPageEighths(scriptText) {
+  const text = String(scriptText || "");
+  if (!text.trim()) {
+    return 1;
+  }
+  const lineCount = text.split("\n").length;
+  const eighths = Math.round((lineCount / 55) * 8);
+  return Math.max(1, eighths);
+}
+
+function formatPageEighths(totalEighths) {
+  const safeTotal = Number.isFinite(totalEighths) ? Math.max(0, totalEighths) : 0;
+  const whole = Math.floor(safeTotal / 8);
+  const eighths = safeTotal % 8;
+  return `${whole} ${eighths}/8`;
 }
 
 function createSchedule(name) {
@@ -136,6 +153,7 @@ function loadWorkspace() {
 }
 
 function buildStripFromParsedScene(scene, index, fallbackIdPrefix = "scene") {
+  const scriptText = scene.scene_text || "";
   return {
     id: createId(fallbackIdPrefix),
     sceneNumber: scene.scene_number,
@@ -143,19 +161,23 @@ function buildStripFromParsedScene(scene, index, fallbackIdPrefix = "scene") {
     location: scene.location,
     cast: Array.isArray(scene.cast) ? scene.cast : [],
     needsReview: Boolean(scene.needs_review),
-    pageEighths: 1,
+    pageEighths: estimateVisualPageEighths(scriptText),
     intExt: inferIntExt(scene.heading),
     timeOfDay: inferTimeOfDay(scene.heading, scene.time_of_day),
     props: [],
     wardrobe: [],
     notes: "",
-    scriptText: scene.scene_text || "",
+    scriptText,
     sourceOrder: index,
   };
 }
 
 export default function App() {
   const [workspace, setWorkspace] = useState(loadWorkspace);
+  const [activeView, setActiveView] = useState("schedule");
+  const [reportView, setReportView] = useState("stripboard");
+  const [selectedFullScriptSceneId, setSelectedFullScriptSceneId] = useState(null);
+  const parseUploaderRef = useRef(null);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(workspace));
@@ -180,6 +202,32 @@ export default function App() {
     }
     return Object.values(activeSchedule.stripsByDay).flat();
   }, [activeSchedule]);
+
+  const sortedScenes = useMemo(() => {
+    return [...allStrips].sort((a, b) => {
+      const aOrder = Number.isFinite(a.sourceOrder) ? a.sourceOrder : Number.MAX_SAFE_INTEGER;
+      const bOrder = Number.isFinite(b.sourceOrder) ? b.sourceOrder : Number.MAX_SAFE_INTEGER;
+      if (aOrder !== bOrder) {
+        return aOrder - bOrder;
+      }
+      return Number(a.sceneNumber) - Number(b.sceneNumber);
+    });
+  }, [allStrips]);
+
+  useEffect(() => {
+    if (!sortedScenes.length) {
+      setSelectedFullScriptSceneId(null);
+      return;
+    }
+    if (!sortedScenes.some((scene) => scene.id === selectedFullScriptSceneId)) {
+      setSelectedFullScriptSceneId(sortedScenes[0].id);
+    }
+  }, [selectedFullScriptSceneId, sortedScenes]);
+
+  const selectedFullScriptScene = useMemo(
+    () => sortedScenes.find((scene) => scene.id === selectedFullScriptSceneId) ?? null,
+    [selectedFullScriptSceneId, sortedScenes]
+  );
 
   const needsReview = useMemo(() => allStrips.filter((strip) => strip.needsReview).length, [allStrips]);
 
@@ -253,6 +301,7 @@ export default function App() {
             intExt: inferIntExt(scene.heading),
             timeOfDay: inferTimeOfDay(scene.heading, scene.time_of_day),
             scriptText: scene.scene_text || "",
+            pageEighths: estimateVisualPageEighths(scene.scene_text || ""),
             sourceOrder: orderIndex,
           });
           return;
@@ -430,29 +479,50 @@ export default function App() {
         <p>Upload screenplay PDFs, review scene extraction, and build versioned stripboard schedules.</p>
       </header>
 
-      <section className="panel schedule-switcher-panel">
-        <div className="switcher-row">
-          <label>
-            Project
-            <select
-              value={activeProject.id}
-              onChange={(event) => setWorkspace((prev) => ({ ...prev, activeProjectId: event.target.value }))}
-            >
-              {workspace.projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button type="button" onClick={addProject}>
-            New Project
-          </button>
-          <button type="button" onClick={renameActiveProject}>
-            Rename Project
-          </button>
-          <label>
-            Schedule Version
+      <section className="panel menu-bar-panel">
+        <div className="menu-bar">
+          <details className="menu-group">
+            <summary>File</summary>
+            <div className="menu-content">
+              <button type="button" onClick={addProject}>New Project</button>
+              <label>
+                Project Select
+                <select
+                  value={activeProject.id}
+                  onChange={(event) => setWorkspace((prev) => ({ ...prev, activeProjectId: event.target.value }))}
+                >
+                  {workspace.projects.map((project) => (
+                    <option key={project.id} value={project.id}>
+                      {project.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button type="button" onClick={renameActiveProject}>Rename Project</button>
+              <button type="button" onClick={() => parseUploaderRef.current?.openImport()}>Import Script</button>
+              <button type="button" onClick={() => parseUploaderRef.current?.openUpdate()}>Update Script</button>
+            </div>
+          </details>
+
+          <details className="menu-group">
+            <summary>Elements</summary>
+            <div className="menu-content">
+              <button type="button" onClick={() => setActiveView("elements")}>Elements View</button>
+              <button type="button" onClick={() => setActiveView("fullScript")}>Full Script</button>
+            </div>
+          </details>
+
+          <details className="menu-group">
+            <summary>Reports</summary>
+            <div className="menu-content">
+              <button type="button" onClick={() => { setActiveView("schedule"); setReportView("stripboard"); }}>Stripboard</button>
+              <button type="button" onClick={() => { setActiveView("schedule"); setReportView("dood"); }}>DooD</button>
+              <button type="button" onClick={() => { setActiveView("schedule"); setReportView("character"); }}>Character Report</button>
+            </div>
+          </details>
+
+          <label className="menu-inline">
+            Schedule
             <select
               value={activeSchedule.id}
               onChange={(event) => {
@@ -475,17 +545,13 @@ export default function App() {
               ))}
             </select>
           </label>
-          <button type="button" onClick={renameActiveSchedule}>
-            Rename Schedule
-          </button>
-          <button type="button" onClick={duplicateSchedule}>
-            Duplicate Schedule
-          </button>
+          <button type="button" onClick={renameActiveSchedule}>Rename Schedule</button>
+          <button type="button" onClick={duplicateSchedule}>Duplicate Schedule</button>
         </div>
-      </section>
 
-      <section className="panel">
         <ParseUploader
+          ref={parseUploaderRef}
+          showControls={false}
           onParsed={(payload) => {
             hydrateStrips(payload.scenes);
           }}
@@ -496,17 +562,100 @@ export default function App() {
         <div className="stats">
           <strong>Scenes:</strong> {allStrips.length}
           <span><strong>Needs Review:</strong> {needsReview}</span>
+          <span>
+            <strong>View:</strong>{" "}
+            {activeView === "schedule"
+              ? reportView === "stripboard"
+                ? "Stripboard"
+                : reportView === "dood"
+                  ? "DooD"
+                  : "Character Report"
+              : activeView === "elements"
+                ? "Elements View"
+                : "Full Script"}
+          </span>
         </div>
       </section>
 
-      <section className="panel">
-        <Stripboard
-          days={activeSchedule.days}
-          setDays={setDaysForActiveSchedule}
-          stripsByDay={activeSchedule.stripsByDay}
-          setStripsByDay={setStripsForActiveSchedule}
-        />
-      </section>
+      {activeView === "fullScript" ? (
+        <section className="panel">
+          <h3>Full Script</h3>
+          <div className="full-script-layout">
+            <div className="full-script-scene-list">
+              {sortedScenes.map((scene) => (
+                <button
+                  key={scene.id}
+                  type="button"
+                  className={selectedFullScriptSceneId === scene.id ? "entity-item active" : "entity-item"}
+                  onClick={() => setSelectedFullScriptSceneId(scene.id)}
+                >
+                  <span>Scene {scene.sceneNumber}</span>
+                  <span>{scene.heading}</span>
+                </button>
+              ))}
+            </div>
+            <div>
+              {!selectedFullScriptScene ? (
+                <p>No scene selected.</p>
+              ) : (
+                <div className="full-script-detail">
+                  <h4>Scene {selectedFullScriptScene.sceneNumber}</h4>
+                  <p><strong>Heading:</strong> {selectedFullScriptScene.heading}</p>
+                  <p><strong>Location:</strong> {selectedFullScriptScene.location}</p>
+                  <p><strong>INT/EXT:</strong> {selectedFullScriptScene.intExt}</p>
+                  <p><strong>Time:</strong> {selectedFullScriptScene.timeOfDay}</p>
+                  <p><strong>Page Count:</strong> {formatPageEighths(selectedFullScriptScene.pageEighths)}</p>
+                  <p><strong>Cast:</strong> {(selectedFullScriptScene.cast ?? []).join(", ") || "None"}</p>
+                  <p><strong>Props:</strong> {(selectedFullScriptScene.props ?? []).join(", ") || "None"}</p>
+                  <p><strong>Wardrobe:</strong> {(selectedFullScriptScene.wardrobe ?? []).join(", ") || "None"}</p>
+                  <p><strong>Notes:</strong> {selectedFullScriptScene.notes || "None"}</p>
+                  <pre className="full-script-scene-text">{selectedFullScriptScene.scriptText || ""}</pre>
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      {activeView === "elements" ? (
+        <section className="panel">
+          <Stripboard
+            days={activeSchedule.days}
+            setDays={setDaysForActiveSchedule}
+            stripsByDay={activeSchedule.stripsByDay}
+            setStripsByDay={setStripsForActiveSchedule}
+            showElementsView
+            reportView="none"
+            showWorkbench={false}
+          />
+        </section>
+      ) : null}
+
+      {activeView === "schedule" ? (
+        <section className="panel">
+          {reportView === "dood" ? (
+            <div className="report-placeholder">
+              <h3>DooD Report</h3>
+              <p>DooD view scaffold is selected. Scene-day assignment data is ready for report formatting.</p>
+            </div>
+          ) : null}
+          {reportView === "character" ? (
+            <div className="report-placeholder">
+              <h3>Character Report</h3>
+              <p>Use Elements View to drill by cast now; printable character report formatting is next.</p>
+            </div>
+          ) : null}
+          <Stripboard
+            days={activeSchedule.days}
+            setDays={setDaysForActiveSchedule}
+            stripsByDay={activeSchedule.stripsByDay}
+            setStripsByDay={setStripsForActiveSchedule}
+            showElementsView={false}
+            reportView={reportView}
+            showWorkbench
+          />
+        </section>
+      ) : null}
     </main>
   );
 }

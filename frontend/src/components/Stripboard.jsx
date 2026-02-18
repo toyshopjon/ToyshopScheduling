@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 const UNSCHEDULED_DAY = "Unscheduled";
 const TIME_OPTIONS = ["DAY", "NIGHT", "DAWN", "DUSK", "MORNING", "EVENING", "SUNRISE", "SUNSET"];
@@ -15,11 +15,62 @@ function formatPageEighths(totalEighths) {
   return `${whole} ${eighths}/8`;
 }
 
+function parsePageCountToEighths(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return null;
+  }
+
+  const mixedMatch = raw.match(/^(\d+)\s+([0-7])\s*\/\s*8$/);
+  if (mixedMatch) {
+    return Number.parseInt(mixedMatch[1], 10) * 8 + Number.parseInt(mixedMatch[2], 10);
+  }
+
+  const fractionMatch = raw.match(/^([0-7])\s*\/\s*8$/);
+  if (fractionMatch) {
+    return Number.parseInt(fractionMatch[1], 10);
+  }
+
+  const wholeMatch = raw.match(/^(\d+)$/);
+  if (wholeMatch) {
+    return Number.parseInt(wholeMatch[1], 10) * 8;
+  }
+
+  const decimal = Number.parseFloat(raw);
+  if (!Number.isNaN(decimal) && decimal >= 0) {
+    return Math.round(decimal * 8);
+  }
+
+  return null;
+}
+
+function estimateVisualPageEighths(scriptText) {
+  const text = String(scriptText || "");
+  if (!text.trim()) {
+    return 1;
+  }
+  const lineCount = text.split("\n").length;
+  const eighths = Math.round((lineCount / 55) * 8);
+  return Math.max(1, eighths);
+}
+
 function parseList(value) {
   return String(value || "")
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function addValueToCommaList(source, value) {
+  const candidate = String(value || "").trim();
+  if (!candidate) {
+    return source;
+  }
+  const existing = parseList(source);
+  if (existing.some((item) => item.toUpperCase() === candidate.toUpperCase())) {
+    return existing.join(", ");
+  }
+  return [...existing, candidate].join(", ");
 }
 
 function getDayTotalEighths(strips = []) {
@@ -74,17 +125,27 @@ function toDraft(strip, day) {
     needsReview: Boolean(strip?.needsReview),
     intExt: strip?.intExt || "INT",
     timeOfDay: strip?.timeOfDay || "DAY",
-    pageWhole: String(Math.floor(totalEighths / 8)),
-    pageEighths: String(totalEighths % 8),
+    pageCount: formatPageEighths(totalEighths),
   };
 }
 
-export function Stripboard({ days, setDays, stripsByDay, setStripsByDay }) {
+export function Stripboard({
+  days,
+  setDays,
+  stripsByDay,
+  setStripsByDay,
+  showElementsView = true,
+  reportView = "stripboard",
+  showWorkbench = true,
+}) {
   const [dragged, setDragged] = useState(null);
   const [selectedStripIds, setSelectedStripIds] = useState(new Set());
   const [colorMode, setColorMode] = useState("dayNight");
   const [editorTarget, setEditorTarget] = useState(null);
   const [draft, setDraft] = useState(toDraft(null, UNSCHEDULED_DAY));
+  const [entityType, setEntityType] = useState("cast");
+  const [selectedEntity, setSelectedEntity] = useState("");
+  const [quickAddValue, setQuickAddValue] = useState({ cast: "", props: "", wardrobe: "" });
 
   const stripCount = useMemo(
     () => Object.values(stripsByDay).reduce((count, dayStrips) => count + dayStrips.length, 0),
@@ -92,6 +153,81 @@ export function Stripboard({ days, setDays, stripsByDay, setStripsByDay }) {
   );
 
   const shootingDays = useMemo(() => days.filter((day) => day !== UNSCHEDULED_DAY), [days]);
+  const allSceneRefs = useMemo(() => {
+    const refs = [];
+    for (const day of days) {
+      for (const strip of stripsByDay[day] ?? []) {
+        refs.push({ day, strip });
+      }
+    }
+    return refs;
+  }, [days, stripsByDay]);
+
+  const entityIndex = useMemo(() => {
+    const maps = {
+      cast: new Map(),
+      location: new Map(),
+      props: new Map(),
+      wardrobe: new Map(),
+    };
+
+    for (const ref of allSceneRefs) {
+      const pushToMap = (type, rawValue) => {
+        const value = String(rawValue || "").trim();
+        if (!value) {
+          return;
+        }
+        if (!maps[type].has(value)) {
+          maps[type].set(value, []);
+        }
+        maps[type].get(value).push(ref);
+      };
+
+      for (const castValue of ref.strip.cast ?? []) {
+        pushToMap("cast", castValue);
+      }
+      pushToMap("location", ref.strip.location);
+      for (const propValue of ref.strip.props ?? []) {
+        pushToMap("props", propValue);
+      }
+      for (const wardrobeValue of ref.strip.wardrobe ?? []) {
+        pushToMap("wardrobe", wardrobeValue);
+      }
+    }
+
+    return maps;
+  }, [allSceneRefs]);
+
+  const entityList = useMemo(() => {
+    return Array.from(entityIndex[entityType].entries())
+      .map(([value, refs]) => ({ value, count: refs.length }))
+      .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+  }, [entityIndex, entityType]);
+
+  const currentEntityScenes = useMemo(() => {
+    if (!selectedEntity) {
+      return [];
+    }
+    return entityIndex[entityType].get(selectedEntity) ?? [];
+  }, [entityIndex, entityType, selectedEntity]);
+
+  const castSuggestions = useMemo(() => Array.from(entityIndex.cast.keys()).sort((a, b) => a.localeCompare(b)), [entityIndex]);
+  const locationSuggestions = useMemo(() => Array.from(entityIndex.location.keys()).sort((a, b) => a.localeCompare(b)), [entityIndex]);
+  const propsSuggestions = useMemo(() => Array.from(entityIndex.props.keys()).sort((a, b) => a.localeCompare(b)), [entityIndex]);
+  const wardrobeSuggestions = useMemo(
+    () => Array.from(entityIndex.wardrobe.keys()).sort((a, b) => a.localeCompare(b)),
+    [entityIndex]
+  );
+
+  useEffect(() => {
+    if (!entityList.length) {
+      setSelectedEntity("");
+      return;
+    }
+    if (!entityList.some((item) => item.value === selectedEntity)) {
+      setSelectedEntity(entityList[0].value);
+    }
+  }, [entityList, selectedEntity]);
 
   function onDrop(targetDay) {
     if (!dragged) {
@@ -193,8 +329,8 @@ export function Stripboard({ days, setDays, stripsByDay, setStripsByDay }) {
 
     const numericSceneNumber = Number.parseInt(draft.sceneNumber, 10);
     const sceneNumber = Number.isNaN(numericSceneNumber) ? stripCount + 1 : numericSceneNumber;
-    const whole = Math.max(0, Number.parseInt(draft.pageWhole, 10) || 0);
-    const eighths = Math.min(7, Math.max(0, Number.parseInt(draft.pageEighths, 10) || 0));
+    const parsedPageEighths = parsePageCountToEighths(draft.pageCount);
+    const pageEighths = parsedPageEighths ?? estimateVisualPageEighths(draft.scriptText);
 
     return {
       id: draft.id || createStripId("scene"),
@@ -209,7 +345,7 @@ export function Stripboard({ days, setDays, stripsByDay, setStripsByDay }) {
       needsReview: draft.needsReview,
       intExt: draft.intExt,
       timeOfDay: draft.timeOfDay,
-      pageEighths: whole * 8 + eighths,
+      pageEighths,
     };
   }
 
@@ -275,6 +411,15 @@ export function Stripboard({ days, setDays, stripsByDay, setStripsByDay }) {
     setDraft(toDraft(strip, targetDay));
   }
 
+  function addQuickSuggestion(field) {
+    const value = quickAddValue[field];
+    if (!value) {
+      return;
+    }
+    setDraft((prev) => ({ ...prev, [field]: addValueToCommaList(prev[field], value) }));
+    setQuickAddValue((prev) => ({ ...prev, [field]: "" }));
+  }
+
   function renderStrip(strip, day) {
     const selected = selectedStripIds.has(strip.id);
     const stripStyle = getStripStyle(strip, colorMode);
@@ -328,6 +473,7 @@ export function Stripboard({ days, setDays, stripsByDay, setStripsByDay }) {
         ))}
       </div>
 
+      {showWorkbench ? (
       <section className="scene-editor">
         <h3>Scene Workbench</h3>
         <form onSubmit={(event) => event.preventDefault()}>
@@ -366,22 +512,22 @@ export function Stripboard({ days, setDays, stripsByDay, setStripsByDay }) {
           <div className="editor-row-secondary">
             <label>
               Location (Set)
-              <input type="text" value={draft.location} onChange={(event) => setDraft((prev) => ({ ...prev, location: event.target.value }))} />
+              <input
+                type="text"
+                list="location-suggestions"
+                value={draft.location}
+                onChange={(event) => setDraft((prev) => ({ ...prev, location: event.target.value }))}
+              />
             </label>
-            <div className="editor-grid-pages">
-              <label>
-                Whole Pages
-                <input type="number" min="0" value={draft.pageWhole} onChange={(event) => setDraft((prev) => ({ ...prev, pageWhole: event.target.value }))} />
-              </label>
-              <label>
-                8ths
-                <select value={draft.pageEighths} onChange={(event) => setDraft((prev) => ({ ...prev, pageEighths: event.target.value }))}>
-                  {Array.from({ length: 8 }, (_, index) => (
-                    <option key={index} value={String(index)}>{index}/8</option>
-                  ))}
-                </select>
-              </label>
-            </div>
+            <label className="field-page-count">
+              Page Count
+              <input
+                type="text"
+                value={draft.pageCount}
+                placeholder="e.g. 2 3/8"
+                onChange={(event) => setDraft((prev) => ({ ...prev, pageCount: event.target.value }))}
+              />
+            </label>
             <label>
               Scheduled Day
               <select value={draft.day} onChange={(event) => setDraft((prev) => ({ ...prev, day: event.target.value }))}>
@@ -396,13 +542,51 @@ export function Stripboard({ days, setDays, stripsByDay, setStripsByDay }) {
               Cast (comma separated)
               <input type="text" value={draft.cast} onChange={(event) => setDraft((prev) => ({ ...prev, cast: event.target.value }))} />
             </label>
+            <label className="inline-suggest">
+              Cast Suggestions
+              <div className="suggest-add">
+                <input
+                  type="text"
+                  list="cast-suggestions"
+                  value={quickAddValue.cast}
+                  onChange={(event) => setQuickAddValue((prev) => ({ ...prev, cast: event.target.value }))}
+                />
+                <button type="button" onClick={() => addQuickSuggestion("cast")}>Add</button>
+              </div>
+            </label>
             <label>
               Props (comma separated)
               <input type="text" value={draft.props} onChange={(event) => setDraft((prev) => ({ ...prev, props: event.target.value }))} />
             </label>
+          </div>
+          <div className="editor-row-secondary">
+            <label className="inline-suggest">
+              Props Suggestions
+              <div className="suggest-add">
+                <input
+                  type="text"
+                  list="props-suggestions"
+                  value={quickAddValue.props}
+                  onChange={(event) => setQuickAddValue((prev) => ({ ...prev, props: event.target.value }))}
+                />
+                <button type="button" onClick={() => addQuickSuggestion("props")}>Add</button>
+              </div>
+            </label>
             <label>
               Wardrobe (comma separated)
               <input type="text" value={draft.wardrobe} onChange={(event) => setDraft((prev) => ({ ...prev, wardrobe: event.target.value }))} />
+            </label>
+            <label className="inline-suggest">
+              Wardrobe Suggestions
+              <div className="suggest-add">
+                <input
+                  type="text"
+                  list="wardrobe-suggestions"
+                  value={quickAddValue.wardrobe}
+                  onChange={(event) => setQuickAddValue((prev) => ({ ...prev, wardrobe: event.target.value }))}
+                />
+                <button type="button" onClick={() => addQuickSuggestion("wardrobe")}>Add</button>
+              </div>
             </label>
           </div>
           <label>
@@ -417,10 +601,72 @@ export function Stripboard({ days, setDays, stripsByDay, setStripsByDay }) {
             <input type="checkbox" checked={draft.needsReview} onChange={(event) => setDraft((prev) => ({ ...prev, needsReview: event.target.checked }))} />
             Needs Review
           </label>
+          <datalist id="cast-suggestions">
+            {castSuggestions.map((value) => (
+              <option key={value} value={value} />
+            ))}
+          </datalist>
+          <datalist id="location-suggestions">
+            {locationSuggestions.map((value) => (
+              <option key={value} value={value} />
+            ))}
+          </datalist>
+          <datalist id="props-suggestions">
+            {propsSuggestions.map((value) => (
+              <option key={value} value={value} />
+            ))}
+          </datalist>
+          <datalist id="wardrobe-suggestions">
+            {wardrobeSuggestions.map((value) => (
+              <option key={value} value={value} />
+            ))}
+          </datalist>
         </form>
       </section>
+      ) : null}
 
-      <div className="stripboard-layout">
+      {showElementsView ? (
+        <section className="entity-browser">
+          <h3>Elements View</h3>
+          <div className="entity-controls">
+            <label>
+              Browse
+              <select value={entityType} onChange={(event) => setEntityType(event.target.value)}>
+                <option value="cast">Cast</option>
+                <option value="location">Location</option>
+                <option value="props">Props</option>
+                <option value="wardrobe">Wardrobe</option>
+              </select>
+            </label>
+          </div>
+          <div className="entity-layout">
+            <div className="entity-list">
+              {entityList.map((item) => (
+                <button
+                  key={item.value}
+                  type="button"
+                  className={selectedEntity === item.value ? "entity-item active" : "entity-item"}
+                  onClick={() => setSelectedEntity(item.value)}
+                >
+                  <span>{item.value}</span>
+                  <span>{item.count}</span>
+                </button>
+              ))}
+            </div>
+            <div className="entity-scenes">
+              <h4>{selectedEntity || "Select an item"}</h4>
+              {currentEntityScenes.map(({ day, strip }) => (
+                <button key={`${selectedEntity}-${strip.id}`} type="button" className="entity-scene-item" onClick={() => selectStrip(strip, day)}>
+                  Scene {strip.sceneNumber} | {day} | {strip.heading}
+                </button>
+              ))}
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      {reportView === "stripboard" ? (
+        <div className="stripboard-layout">
         <div className="board-shell">
           <section className="column unscheduled-column" onDragOver={(event) => event.preventDefault()} onDrop={() => onDrop(UNSCHEDULED_DAY)}>
             <h3>{UNSCHEDULED_DAY} <span className="day-total">{formatPageEighths(getDayTotalEighths(stripsByDay[UNSCHEDULED_DAY] ?? []))} pages</span></h3>
@@ -440,6 +686,7 @@ export function Stripboard({ days, setDays, stripsByDay, setStripsByDay }) {
           </div>
         </div>
       </div>
+      ) : null}
     </div>
   );
 }

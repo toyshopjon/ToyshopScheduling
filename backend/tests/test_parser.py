@@ -36,3 +36,13 @@ He opens the fridge.
 
     assert len(scenes) == 1
     assert "JON\n\nHe opens the fridge." in scenes[0].scene_text
+
+
+def test_scene_text_preserves_tabs_and_spacing() -> None:
+    parser = ScriptParser()
+    text = "INT. OFFICE - DAY\n\tJON\n    He checks notes.\n"
+
+    scenes = parser._split_into_scenes(text)
+
+    assert len(scenes) == 1
+    assert scenes[0].scene_text == "INT. OFFICE - DAY\n\tJON\n    He checks notes."

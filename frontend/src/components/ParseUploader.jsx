@@ -1,8 +1,8 @@
-import { useRef, useState } from "react";
+import { forwardRef, useImperativeHandle, useRef, useState } from "react";
 
 const API_URL = "http://localhost:8000/scripts/parse";
 
-export function ParseUploader({ onParsed, onRescanned }) {
+export const ParseUploader = forwardRef(function ParseUploader({ onParsed, onRescanned, showControls = true }, ref) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [mode, setMode] = useState("replace");
@@ -15,6 +15,19 @@ export function ParseUploader({ onParsed, onRescanned }) {
     setMode(nextMode);
     inputRef.current?.click();
   }
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      openImport() {
+        openPicker("replace");
+      },
+      openUpdate() {
+        openPicker("rescan");
+      },
+    }),
+    [busy]
+  );
 
   async function handleFileChange(event) {
     const file = event.target.files?.[0];
@@ -54,14 +67,16 @@ export function ParseUploader({ onParsed, onRescanned }) {
 
   return (
     <div className="uploader">
-      <div className="uploader-actions">
-        <button type="button" onClick={() => openPicker("replace")} disabled={busy}>
-          {busy && mode === "replace" ? "Importing..." : "Import Script (Replace)"}
-        </button>
-        <button type="button" onClick={() => openPicker("rescan")} disabled={busy}>
-          {busy && mode === "rescan" ? "Rescanning..." : "Rescan Script (Merge Updates)"}
-        </button>
-      </div>
+      {showControls ? (
+        <div className="uploader-actions">
+          <button type="button" onClick={() => openPicker("replace")} disabled={busy}>
+            {busy && mode === "replace" ? "Importing..." : "Import Script (Replace)"}
+          </button>
+          <button type="button" onClick={() => openPicker("rescan")} disabled={busy}>
+            {busy && mode === "rescan" ? "Rescanning..." : "Rescan Script (Merge Updates)"}
+          </button>
+        </div>
+      ) : null}
       <input
         ref={inputRef}
         id="script-upload"
@@ -74,4 +89,4 @@ export function ParseUploader({ onParsed, onRescanned }) {
       {error ? <p className="error">{error}</p> : null}
     </div>
   );
-}
+});

@@ -71,11 +71,11 @@ class ScriptParser:
                 active_location = heading_match.group("location").strip().upper()
                 active_time = heading_match.group("time").strip().upper()
                 cast = set()
-                scene_lines = [raw_line.rstrip()]
+                scene_lines = [raw_line]
                 continue
 
             if active_heading:
-                scene_lines.append(raw_line.rstrip())
+                scene_lines.append(raw_line)
                 if stripped_line and CHARACTER_CUE_PATTERN.match(stripped_line):
                     cast.add(stripped_line)
 
@@ -104,7 +104,7 @@ class ScriptParser:
     ) -> Scene:
         confidence = 0.95 if cast else 0.78
         needs_review = not cast
-        scene_text = "\n".join(scene_lines).strip()
+        scene_text = "\n".join(scene_lines)
         return Scene(
             number=number,
             heading=heading,
