@@ -1,0 +1,172 @@
+:root {
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  color: #121212;
+  background: #f7f8fa;
+}
+
+body {
+  margin: 0;
+}
+
+.app-shell {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.hero {
+  margin-bottom: 16px;
+}
+
+.hero h1 {
+  margin: 0;
+}
+
+.panel {
+  background: #fff;
+  border: 1px solid #d9e0e8;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.stats {
+  display: flex;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+  align-items: center;
+}
+
+.manual-scene-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.manual-scene-form h3 {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.manual-scene-form input,
+.manual-scene-form select,
+.scene-editor input,
+.scene-editor select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 8px;
+}
+
+.inline-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+}
+
+.stripboard-layout {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 14px;
+}
+
+.board {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.column {
+  background: #f3f5f9;
+  border-radius: 8px;
+  padding: 8px;
+  min-height: 360px;
+}
+
+.strip {
+  background: #ffffff;
+  border: 1px solid #d3dbe6;
+  border-left: 4px solid #2f5bd1;
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 8px;
+  cursor: pointer;
+}
+
+.strip.selected {
+  outline: 2px solid #1e8a46;
+}
+
+.strip.editing {
+  border-left-color: #1e8a46;
+}
+
+.strip h4 {
+  margin: 8px 0 4px;
+}
+
+.strip p {
+  margin: 2px 0;
+  font-size: 14px;
+}
+
+.flag {
+  display: inline-block;
+  margin-top: 6px;
+  color: #8a1111;
+  font-weight: 700;
+}
+
+.error {
+  color: #8a1111;
+}
+
+.add-day-button {
+  font-weight: 600;
+}
+
+.scene-editor {
+  background: #f7f9fc;
+  border: 1px solid #d3dbe6;
+  border-radius: 8px;
+  padding: 10px;
+  height: fit-content;
+}
+
+.scene-editor h3 {
+  margin-top: 0;
+}
+
+.scene-editor form {
+  display: grid;
+  gap: 8px;
+}
+
+.scene-editor label {
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+}
+
+.editor-actions {
+  display: flex;
+  gap: 8px;
+}
+
+@media (max-width: 900px) {
+  .stripboard-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .board {
+    grid-template-columns: 1fr;
+  }
+}
