@@ -46,3 +46,45 @@ def test_scene_text_preserves_tabs_and_spacing() -> None:
 
     assert len(scenes) == 1
     assert scenes[0].scene_text == "INT. OFFICE - DAY\n\tJON\n    He checks notes."
+
+
+def test_character_cue_with_colon_and_hyphen_is_detected() -> None:
+    parser = ScriptParser()
+    text = """
+INT. BAR - NIGHT
+BAR-GOER:
+Designated driver?
+"""
+    scenes = parser._split_into_scenes(text)
+
+    assert len(scenes) == 1
+    assert "BAR-GOER" in scenes[0].cast
+
+
+def test_all_caps_intro_in_action_line_is_added_to_scene_cast() -> None:
+    parser = ScriptParser()
+    text = """
+INT. BAR - NIGHT
+Ripley scans the room as BAR-GOER (30s) leans in.
+"""
+    scenes = parser._split_into_scenes(text)
+
+    assert len(scenes) == 1
+    assert "BAR-GOER" in scenes[0].cast
+
+
+def test_second_pass_adds_speaking_character_mentions_in_other_scenes() -> None:
+    parser = ScriptParser()
+    text = """
+INT. BRIDGE - NIGHT
+RIPLEY
+We should leave.
+
+EXT. STREET - DAY
+The crowd parts as RIPLEY walks through the rain.
+"""
+    scenes = parser._split_into_scenes(text)
+
+    assert len(scenes) == 2
+    assert "RIPLEY" in scenes[0].cast
+    assert "RIPLEY" in scenes[1].cast

@@ -17,60 +17,38 @@ function formatPageEighths(totalEighths) {
 
 function parsePageCountToEighths(value) {
   const raw = String(value || "").trim();
-  if (!raw) {
-    return null;
-  }
-
+  if (!raw) return null;
   const mixedMatch = raw.match(/^(\d+)\s+([0-7])\s*\/\s*8$/);
-  if (mixedMatch) {
-    return Number.parseInt(mixedMatch[1], 10) * 8 + Number.parseInt(mixedMatch[2], 10);
-  }
-
+  if (mixedMatch) return Number.parseInt(mixedMatch[1], 10) * 8 + Number.parseInt(mixedMatch[2], 10);
   const fractionMatch = raw.match(/^([0-7])\s*\/\s*8$/);
-  if (fractionMatch) {
-    return Number.parseInt(fractionMatch[1], 10);
-  }
-
+  if (fractionMatch) return Number.parseInt(fractionMatch[1], 10);
   const wholeMatch = raw.match(/^(\d+)$/);
-  if (wholeMatch) {
-    return Number.parseInt(wholeMatch[1], 10) * 8;
-  }
-
+  if (wholeMatch) return Number.parseInt(wholeMatch[1], 10) * 8;
   const decimal = Number.parseFloat(raw);
-  if (!Number.isNaN(decimal) && decimal >= 0) {
-    return Math.round(decimal * 8);
-  }
-
+  if (!Number.isNaN(decimal) && decimal >= 0) return Math.round(decimal * 8);
   return null;
 }
 
 function estimateVisualPageEighths(scriptText) {
   const text = String(scriptText || "");
-  if (!text.trim()) {
-    return 1;
-  }
+  if (!text.trim()) return 1;
   const lineCount = text.split("\n").length;
   const eighths = Math.round((lineCount / 55) * 8);
   return Math.max(1, eighths);
 }
 
-function parseList(value) {
-  return String(value || "")
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function addValueToCommaList(source, value) {
-  const candidate = String(value || "").trim();
-  if (!candidate) {
-    return source;
+function uniqueValues(values) {
+  const seen = new Set();
+  const next = [];
+  for (const raw of values || []) {
+    const value = String(raw || "").trim();
+    if (!value) continue;
+    const key = value.toUpperCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    next.push(value);
   }
-  const existing = parseList(source);
-  if (existing.some((item) => item.toUpperCase() === candidate.toUpperCase())) {
-    return existing.join(", ");
-  }
-  return [...existing, candidate].join(", ");
+  return next;
 }
 
 function getDayTotalEighths(strips = []) {
@@ -78,17 +56,12 @@ function getDayTotalEighths(strips = []) {
 }
 
 function getStripStyle(strip, colorMode) {
-  if (colorMode === "none") {
-    return {};
-  }
-
+  if (colorMode === "none") return {};
   const time = String(strip.timeOfDay || "").toUpperCase();
   const intExt = String(strip.intExt || "").toUpperCase();
 
   if (colorMode === "dayNight") {
-    if (time === "NIGHT") {
-      return { backgroundColor: "#3352a1", color: "#ffffff", borderColor: "#22366f" };
-    }
+    if (time === "NIGHT") return { backgroundColor: "#3352a1", color: "#ffffff", borderColor: "#22366f" };
     if (["DAWN", "DUSK", "SUNRISE", "SUNSET"].includes(time)) {
       return { backgroundColor: "#e17de8", color: "#202020", borderColor: "#b95cc0" };
     }
@@ -96,12 +69,8 @@ function getStripStyle(strip, colorMode) {
   }
 
   if (colorMode === "intExt") {
-    if (intExt === "EXT") {
-      return { backgroundColor: "#1b9b53", color: "#ffffff", borderColor: "#0f6737" };
-    }
-    if (intExt === "INT/EXT") {
-      return { backgroundColor: "#a1632f", color: "#ffffff", borderColor: "#77451f" };
-    }
+    if (intExt === "EXT") return { backgroundColor: "#1b9b53", color: "#ffffff", borderColor: "#0f6737" };
+    if (intExt === "INT/EXT") return { backgroundColor: "#a1632f", color: "#ffffff", borderColor: "#77451f" };
     return { backgroundColor: "#d8dde7", color: "#1a1a1a", borderColor: "#aeb7ca" };
   }
 
@@ -116,9 +85,10 @@ function toDraft(strip, day) {
     sceneNumber: String(strip?.sceneNumber ?? ""),
     heading: strip?.heading ?? "",
     location: strip?.location ?? "",
-    cast: (strip?.cast ?? []).join(", "),
-    props: (strip?.props ?? []).join(", "),
-    wardrobe: (strip?.wardrobe ?? []).join(", "),
+    cast: uniqueValues(strip?.cast ?? []),
+    props: uniqueValues(strip?.props ?? []),
+    wardrobe: uniqueValues(strip?.wardrobe ?? []),
+    sets: uniqueValues(strip?.sets ?? []),
     scriptText: strip?.scriptText ?? "",
     notes: strip?.notes ?? "",
     day: day || UNSCHEDULED_DAY,
@@ -129,15 +99,38 @@ function toDraft(strip, day) {
   };
 }
 
-export function Stripboard({
-  days,
-  setDays,
-  stripsByDay,
-  setStripsByDay,
-  showElementsView = true,
-  reportView = "stripboard",
-  showWorkbench = true,
-}) {
+function ChipListEditor({ title, values, suggestions, inputValue, onInputChange, onAdd, onRemove, placeholder }) {
+  return (
+    <div className="chip-editor">
+      <div className="chip-editor-header">{title}</div>
+      <div className="chip-list">
+        {values.map((value) => (
+          <button key={value} type="button" className="chip" onClick={() => onRemove(value)}>
+            {value} <span className="chip-x">x</span>
+          </button>
+        ))}
+        {!values.length ? <span className="chip-empty">None</span> : null}
+      </div>
+      <div className="chip-controls">
+        <input
+          type="text"
+          list={`${title}-suggestions-main`}
+          value={inputValue}
+          onChange={(event) => onInputChange(event.target.value)}
+          placeholder={placeholder}
+        />
+        <button type="button" onClick={() => onAdd(inputValue)}>Add</button>
+      </div>
+      <datalist id={`${title}-suggestions-main`}>
+        {suggestions.map((value) => (
+          <option key={value} value={value} />
+        ))}
+      </datalist>
+    </div>
+  );
+}
+
+export function Stripboard({ days, setDays, stripsByDay, setStripsByDay, showElementsView = true, reportView = "stripboard", showWorkbench = true }) {
   const [dragged, setDragged] = useState(null);
   const [selectedStripIds, setSelectedStripIds] = useState(new Set());
   const [colorMode, setColorMode] = useState("dayNight");
@@ -145,136 +138,93 @@ export function Stripboard({
   const [draft, setDraft] = useState(toDraft(null, UNSCHEDULED_DAY));
   const [entityType, setEntityType] = useState("cast");
   const [selectedEntity, setSelectedEntity] = useState("");
-  const [quickAddValue, setQuickAddValue] = useState({ cast: "", props: "", wardrobe: "" });
+  const [chipInputs, setChipInputs] = useState({ cast: "", props: "", wardrobe: "", sets: "", location: "" });
 
-  const stripCount = useMemo(
-    () => Object.values(stripsByDay).reduce((count, dayStrips) => count + dayStrips.length, 0),
-    [stripsByDay]
-  );
-
+  const stripCount = useMemo(() => Object.values(stripsByDay).reduce((count, dayStrips) => count + dayStrips.length, 0), [stripsByDay]);
   const shootingDays = useMemo(() => days.filter((day) => day !== UNSCHEDULED_DAY), [days]);
+
   const allSceneRefs = useMemo(() => {
     const refs = [];
     for (const day of days) {
-      for (const strip of stripsByDay[day] ?? []) {
-        refs.push({ day, strip });
-      }
+      for (const strip of stripsByDay[day] ?? []) refs.push({ day, strip });
     }
     return refs;
   }, [days, stripsByDay]);
 
   const entityIndex = useMemo(() => {
-    const maps = {
-      cast: new Map(),
-      location: new Map(),
-      props: new Map(),
-      wardrobe: new Map(),
+    const maps = { cast: new Map(), location: new Map(), props: new Map(), wardrobe: new Map(), sets: new Map() };
+    const push = (type, raw) => {
+      const value = String(raw || "").trim();
+      if (!value) return;
+      if (!maps[type].has(value)) maps[type].set(value, []);
+      maps[type].get(value).push(1);
     };
 
     for (const ref of allSceneRefs) {
-      const pushToMap = (type, rawValue) => {
-        const value = String(rawValue || "").trim();
-        if (!value) {
-          return;
-        }
-        if (!maps[type].has(value)) {
-          maps[type].set(value, []);
-        }
-        maps[type].get(value).push(ref);
-      };
-
-      for (const castValue of ref.strip.cast ?? []) {
-        pushToMap("cast", castValue);
-      }
-      pushToMap("location", ref.strip.location);
-      for (const propValue of ref.strip.props ?? []) {
-        pushToMap("props", propValue);
-      }
-      for (const wardrobeValue of ref.strip.wardrobe ?? []) {
-        pushToMap("wardrobe", wardrobeValue);
-      }
+      for (const v of ref.strip.cast ?? []) push("cast", v);
+      push("location", ref.strip.location);
+      for (const v of ref.strip.props ?? []) push("props", v);
+      for (const v of ref.strip.wardrobe ?? []) push("wardrobe", v);
+      for (const v of ref.strip.sets ?? []) push("sets", v);
     }
-
     return maps;
   }, [allSceneRefs]);
 
-  const entityList = useMemo(() => {
-    return Array.from(entityIndex[entityType].entries())
-      .map(([value, refs]) => ({ value, count: refs.length }))
-      .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
-  }, [entityIndex, entityType]);
-
+  const entityList = useMemo(() => Array.from(entityIndex[entityType].entries()).map(([value, refs]) => ({ value, count: refs.length })).sort((a, b) => b.count - a.count || a.value.localeCompare(b.value)), [entityIndex, entityType]);
   const currentEntityScenes = useMemo(() => {
-    if (!selectedEntity) {
-      return [];
+    if (!selectedEntity) return [];
+    const out = [];
+    for (const ref of allSceneRefs) {
+      const pool = entityType === "location" ? [ref.strip.location] : (ref.strip[entityType] ?? []);
+      if (pool.some((item) => String(item || "").trim() === selectedEntity)) out.push(ref);
     }
-    return entityIndex[entityType].get(selectedEntity) ?? [];
-  }, [entityIndex, entityType, selectedEntity]);
+    return out;
+  }, [allSceneRefs, entityType, selectedEntity]);
 
   const castSuggestions = useMemo(() => Array.from(entityIndex.cast.keys()).sort((a, b) => a.localeCompare(b)), [entityIndex]);
   const locationSuggestions = useMemo(() => Array.from(entityIndex.location.keys()).sort((a, b) => a.localeCompare(b)), [entityIndex]);
   const propsSuggestions = useMemo(() => Array.from(entityIndex.props.keys()).sort((a, b) => a.localeCompare(b)), [entityIndex]);
-  const wardrobeSuggestions = useMemo(
-    () => Array.from(entityIndex.wardrobe.keys()).sort((a, b) => a.localeCompare(b)),
-    [entityIndex]
-  );
+  const wardrobeSuggestions = useMemo(() => Array.from(entityIndex.wardrobe.keys()).sort((a, b) => a.localeCompare(b)), [entityIndex]);
+  const setsSuggestions = useMemo(() => Array.from(entityIndex.sets.keys()).sort((a, b) => a.localeCompare(b)), [entityIndex]);
 
   useEffect(() => {
     if (!entityList.length) {
       setSelectedEntity("");
       return;
     }
-    if (!entityList.some((item) => item.value === selectedEntity)) {
-      setSelectedEntity(entityList[0].value);
-    }
+    if (!entityList.some((item) => item.value === selectedEntity)) setSelectedEntity(entityList[0].value);
   }, [entityList, selectedEntity]);
 
   function onDrop(targetDay) {
-    if (!dragged) {
-      return;
-    }
-
+    if (!dragged) return;
     setStripsByDay((prev) => {
       const next = Object.fromEntries(Object.entries(prev).map(([day, strips]) => [day, [...strips]]));
       const source = (next[dragged.day] ?? []).find((strip) => strip.id === dragged.id);
-      if (!source) {
-        return prev;
-      }
-
+      if (!source) return prev;
       next[dragged.day] = (next[dragged.day] ?? []).filter((strip) => strip.id !== dragged.id);
       next[targetDay] = [...(next[targetDay] ?? []), source];
       return next;
     });
-
     if (editorTarget?.id === dragged.id) {
       setEditorTarget({ id: dragged.id, day: targetDay });
       setDraft((prev) => ({ ...prev, sourceDay: targetDay, day: targetDay }));
     }
-
     setDragged(null);
   }
 
   function toggleSelect(stripId) {
     setSelectedStripIds((prev) => {
       const next = new Set(prev);
-      if (next.has(stripId)) {
-        next.delete(stripId);
-      } else {
-        next.add(stripId);
-      }
+      if (next.has(stripId)) next.delete(stripId); else next.add(stripId);
       return next;
     });
   }
 
   function bulkMove(targetDay) {
-    if (!selectedStripIds.size) {
-      return;
-    }
-
+    if (!selectedStripIds.size) return;
     setStripsByDay((prev) => {
       const next = Object.fromEntries(Object.entries(prev).map(([day, strips]) => [day, [...strips]]));
       const moving = [];
-
       for (const day of days) {
         next[day] = (next[day] ?? []).filter((strip) => {
           if (selectedStripIds.has(strip.id)) {
@@ -284,28 +234,20 @@ export function Stripboard({
           return true;
         });
       }
-
       next[targetDay] = [...(next[targetDay] ?? []), ...moving];
       return next;
     });
-
     setSelectedStripIds(new Set());
   }
 
   function addDay() {
     const nextDayName = `Day ${shootingDays.length + 1}`;
-
     setDays((prev) => {
-      if (prev.includes(nextDayName)) {
-        return prev;
-      }
+      if (prev.includes(nextDayName)) return prev;
       return [UNSCHEDULED_DAY, ...prev.filter((day) => day !== UNSCHEDULED_DAY), nextDayName];
     });
-
     setStripsByDay((prev) => {
-      if (Object.prototype.hasOwnProperty.call(prev, nextDayName)) {
-        return prev;
-      }
+      if (Object.prototype.hasOwnProperty.call(prev, nextDayName)) return prev;
       return { ...prev, [nextDayName]: [] };
     });
   }
@@ -323,23 +265,20 @@ export function Stripboard({
   function buildStripFromDraft() {
     const heading = draft.heading.trim();
     const location = draft.location.trim();
-    if (!heading || !location) {
-      return null;
-    }
-
+    if (!heading || !location) return null;
     const numericSceneNumber = Number.parseInt(draft.sceneNumber, 10);
     const sceneNumber = Number.isNaN(numericSceneNumber) ? stripCount + 1 : numericSceneNumber;
     const parsedPageEighths = parsePageCountToEighths(draft.pageCount);
     const pageEighths = parsedPageEighths ?? estimateVisualPageEighths(draft.scriptText);
-
     return {
       id: draft.id || createStripId("scene"),
       sceneNumber,
       heading,
       location,
-      cast: parseList(draft.cast),
-      props: parseList(draft.props),
-      wardrobe: parseList(draft.wardrobe),
+      cast: uniqueValues(draft.cast),
+      props: uniqueValues(draft.props),
+      wardrobe: uniqueValues(draft.wardrobe),
+      sets: uniqueValues(draft.sets),
       scriptText: draft.scriptText,
       notes: draft.notes,
       needsReview: draft.needsReview,
@@ -351,79 +290,61 @@ export function Stripboard({
 
   function saveNewScene() {
     const strip = buildStripFromDraft();
-    if (!strip) {
-      return;
-    }
-
+    if (!strip) return;
     const targetDay = days.includes(draft.day) ? draft.day : UNSCHEDULED_DAY;
     strip.id = createStripId("manual");
-
-    setStripsByDay((prev) => ({
-      ...prev,
-      [targetDay]: [...(prev[targetDay] ?? []), strip],
-    }));
-
+    setStripsByDay((prev) => ({ ...prev, [targetDay]: [...(prev[targetDay] ?? []), strip] }));
     setEditorTarget({ id: strip.id, day: targetDay });
     setDraft(toDraft(strip, targetDay));
   }
 
   function updateScene() {
-    if (!editorTarget?.id) {
-      return;
-    }
-
+    if (!editorTarget?.id) return;
     const strip = buildStripFromDraft();
-    if (!strip) {
-      return;
-    }
-
+    if (!strip) return;
     const destinationDay = days.includes(draft.day) ? draft.day : editorTarget.day;
     strip.id = editorTarget.id;
-
     setStripsByDay((prev) => {
       const next = Object.fromEntries(Object.entries(prev).map(([day, strips]) => [day, [...strips]]));
-      for (const day of Object.keys(next)) {
-        next[day] = next[day].filter((item) => item.id !== editorTarget.id);
-      }
+      for (const day of Object.keys(next)) next[day] = next[day].filter((item) => item.id !== editorTarget.id);
       next[destinationDay] = [...(next[destinationDay] ?? []), strip];
       return next;
     });
-
     setEditorTarget({ id: strip.id, day: destinationDay });
     setDraft(toDraft(strip, destinationDay));
   }
 
   function duplicateScene() {
     const strip = buildStripFromDraft();
-    if (!strip) {
-      return;
-    }
-
+    if (!strip) return;
     const targetDay = days.includes(draft.day) ? draft.day : UNSCHEDULED_DAY;
     strip.id = createStripId("dup");
-
-    setStripsByDay((prev) => ({
-      ...prev,
-      [targetDay]: [...(prev[targetDay] ?? []), strip],
-    }));
-
+    setStripsByDay((prev) => ({ ...prev, [targetDay]: [...(prev[targetDay] ?? []), strip] }));
     setEditorTarget({ id: strip.id, day: targetDay });
     setDraft(toDraft(strip, targetDay));
   }
 
-  function addQuickSuggestion(field) {
-    const value = quickAddValue[field];
-    if (!value) {
-      return;
-    }
-    setDraft((prev) => ({ ...prev, [field]: addValueToCommaList(prev[field], value) }));
-    setQuickAddValue((prev) => ({ ...prev, [field]: "" }));
+  function addChip(field, value) {
+    const candidate = String(value || "").trim();
+    if (!candidate) return;
+    setDraft((prev) => ({ ...prev, [field]: uniqueValues([...(prev[field] || []), candidate]) }));
+    setChipInputs((prev) => ({ ...prev, [field]: "" }));
+  }
+
+  function removeChip(field, value) {
+    setDraft((prev) => ({ ...prev, [field]: (prev[field] || []).filter((item) => item !== value) }));
+  }
+
+  function setLocation(value) {
+    const candidate = String(value || "").trim();
+    if (!candidate) return;
+    setDraft((prev) => ({ ...prev, location: candidate }));
+    setChipInputs((prev) => ({ ...prev, location: "" }));
   }
 
   function renderStrip(strip, day) {
     const selected = selectedStripIds.has(strip.id);
     const stripStyle = getStripStyle(strip, colorMode);
-
     return (
       <article
         key={strip.id}
@@ -434,13 +355,7 @@ export function Stripboard({
         onClick={() => selectStrip(strip, day)}
       >
         <label onClick={(event) => event.stopPropagation()}>
-          <input
-            type="checkbox"
-            checked={selected}
-            onChange={() => toggleSelect(strip.id)}
-            onClick={(event) => event.stopPropagation()}
-          />{" "}
-          Select
+          <input type="checkbox" checked={selected} onChange={() => toggleSelect(strip.id)} onClick={(event) => event.stopPropagation()} /> Select
         </label>
         <h4>Scene {strip.sceneNumber}</h4>
         <p className="strip-meta">{formatPageEighths(strip.pageEighths)} pgs | {strip.intExt} | {strip.timeOfDay}</p>
@@ -467,162 +382,100 @@ export function Stripboard({
         </label>
         <button type="button" className="add-day-button" onClick={addDay}>Add Day</button>
         {days.map((day) => (
-          <button key={day} type="button" onClick={() => bulkMove(day)}>
-            Move Selected to {day}
-          </button>
+          <button key={day} type="button" onClick={() => bulkMove(day)}>Move Selected to {day}</button>
         ))}
       </div>
 
       {showWorkbench ? (
-      <section className="scene-editor">
-        <h3>Scene Workbench</h3>
-        <form onSubmit={(event) => event.preventDefault()}>
-          <div className="editor-actions">
-            <button type="button" onClick={updateScene} disabled={!editorTarget}>Update</button>
-            <button type="button" onClick={saveNewScene}>New</button>
-            <button type="button" onClick={duplicateScene}>Duplicate</button>
-            <button type="button" onClick={resetForNew}>Clear</button>
-          </div>
-          <div className="editor-row-primary">
-            <label className="field-scene-number">
-              Scene Number
-              <input type="text" value={draft.sceneNumber} onChange={(event) => setDraft((prev) => ({ ...prev, sceneNumber: event.target.value }))} />
-            </label>
-            <label className="field-int-ext">
-              INT/EXT
-              <select value={draft.intExt} onChange={(event) => setDraft((prev) => ({ ...prev, intExt: event.target.value }))}>
-                {INT_EXT_OPTIONS.map((option) => (
-                  <option key={option} value={option}>{option}</option>
-                ))}
-              </select>
-            </label>
-            <label className="field-time-of-day">
-              Time of Day
-              <select value={draft.timeOfDay} onChange={(event) => setDraft((prev) => ({ ...prev, timeOfDay: event.target.value }))}>
-                {TIME_OPTIONS.map((option) => (
-                  <option key={option} value={option}>{option}</option>
-                ))}
-              </select>
-            </label>
-            <label className="field-heading">
-              Heading
-              <input type="text" value={draft.heading} onChange={(event) => setDraft((prev) => ({ ...prev, heading: event.target.value }))} />
-            </label>
-          </div>
-          <div className="editor-row-secondary">
-            <label>
-              Location (Set)
-              <input
-                type="text"
-                list="location-suggestions"
-                value={draft.location}
-                onChange={(event) => setDraft((prev) => ({ ...prev, location: event.target.value }))}
-              />
-            </label>
-            <label className="field-page-count">
-              Page Count
-              <input
-                type="text"
-                value={draft.pageCount}
-                placeholder="e.g. 2 3/8"
-                onChange={(event) => setDraft((prev) => ({ ...prev, pageCount: event.target.value }))}
-              />
-            </label>
-            <label>
-              Scheduled Day
-              <select value={draft.day} onChange={(event) => setDraft((prev) => ({ ...prev, day: event.target.value }))}>
-                {days.map((day) => (
-                  <option key={day} value={day}>{day}</option>
-                ))}
-              </select>
-            </label>
-          </div>
-          <div className="editor-row-secondary">
-            <label>
-              Cast (comma separated)
-              <input type="text" value={draft.cast} onChange={(event) => setDraft((prev) => ({ ...prev, cast: event.target.value }))} />
-            </label>
-            <label className="inline-suggest">
-              Cast Suggestions
-              <div className="suggest-add">
-                <input
-                  type="text"
-                  list="cast-suggestions"
-                  value={quickAddValue.cast}
-                  onChange={(event) => setQuickAddValue((prev) => ({ ...prev, cast: event.target.value }))}
-                />
-                <button type="button" onClick={() => addQuickSuggestion("cast")}>Add</button>
+        <section className="scene-editor">
+          <h3>Scene Workbench</h3>
+          <form onSubmit={(event) => event.preventDefault()}>
+            <div className="editor-actions">
+              <button type="button" onClick={updateScene} disabled={!editorTarget}>Update</button>
+              <button type="button" onClick={saveNewScene}>New</button>
+              <button type="button" onClick={duplicateScene}>Duplicate</button>
+              <button type="button" onClick={resetForNew}>Clear</button>
+            </div>
+            <div className="editor-row-primary">
+              <label className="field-scene-number">
+                Scene Number
+                <input type="text" value={draft.sceneNumber} onChange={(event) => setDraft((prev) => ({ ...prev, sceneNumber: event.target.value }))} />
+              </label>
+              <label className="field-int-ext">
+                INT/EXT
+                <select value={draft.intExt} onChange={(event) => setDraft((prev) => ({ ...prev, intExt: event.target.value }))}>
+                  {INT_EXT_OPTIONS.map((option) => (<option key={option} value={option}>{option}</option>))}
+                </select>
+              </label>
+              <label className="field-time-of-day">
+                Time of Day
+                <select value={draft.timeOfDay} onChange={(event) => setDraft((prev) => ({ ...prev, timeOfDay: event.target.value }))}>
+                  {TIME_OPTIONS.map((option) => (<option key={option} value={option}>{option}</option>))}
+                </select>
+              </label>
+              <label className="field-heading">
+                Heading
+                <input type="text" value={draft.heading} onChange={(event) => setDraft((prev) => ({ ...prev, heading: event.target.value }))} />
+              </label>
+            </div>
+            <div className="editor-row-secondary">
+              <div className="chip-editor">
+                <div className="chip-editor-header">Location</div>
+                <div className="chip-list">
+                  {draft.location ? (
+                    <button type="button" className="chip" onClick={() => setDraft((prev) => ({ ...prev, location: "" }))}>
+                      {draft.location} <span className="chip-x">x</span>
+                    </button>
+                  ) : (
+                    <span className="chip-empty">None</span>
+                  )}
+                </div>
+                <div className="chip-controls">
+                  <input
+                    type="text"
+                    list="location-suggestions-main"
+                    value={chipInputs.location}
+                    onChange={(event) => setChipInputs((prev) => ({ ...prev, location: event.target.value }))}
+                    placeholder="Set location"
+                  />
+                  <button type="button" onClick={() => setLocation(chipInputs.location)}>Set</button>
+                </div>
+                <datalist id="location-suggestions-main">
+                  {locationSuggestions.map((value) => (<option key={value} value={value} />))}
+                </datalist>
               </div>
+              <label className="field-page-count">
+                Page Count
+                <input type="text" value={draft.pageCount} placeholder="e.g. 2 3/8" onChange={(event) => setDraft((prev) => ({ ...prev, pageCount: event.target.value }))} />
+              </label>
+              <label>
+                Scheduled Day
+                <select value={draft.day} onChange={(event) => setDraft((prev) => ({ ...prev, day: event.target.value }))}>
+                  {days.map((day) => (<option key={day} value={day}>{day}</option>))}
+                </select>
+              </label>
+            </div>
+
+            <div className="chip-grid">
+              <ChipListEditor title="Cast" values={draft.cast} suggestions={castSuggestions} inputValue={chipInputs.cast} onInputChange={(value) => setChipInputs((prev) => ({ ...prev, cast: value }))} onAdd={(value) => addChip("cast", value)} onRemove={(value) => removeChip("cast", value)} placeholder="Add cast" />
+              <ChipListEditor title="Props" values={draft.props} suggestions={propsSuggestions} inputValue={chipInputs.props} onInputChange={(value) => setChipInputs((prev) => ({ ...prev, props: value }))} onAdd={(value) => addChip("props", value)} onRemove={(value) => removeChip("props", value)} placeholder="Add prop" />
+              <ChipListEditor title="Wardrobe" values={draft.wardrobe} suggestions={wardrobeSuggestions} inputValue={chipInputs.wardrobe} onInputChange={(value) => setChipInputs((prev) => ({ ...prev, wardrobe: value }))} onAdd={(value) => addChip("wardrobe", value)} onRemove={(value) => removeChip("wardrobe", value)} placeholder="Add wardrobe" />
+              <ChipListEditor title="Sets" values={draft.sets} suggestions={setsSuggestions} inputValue={chipInputs.sets} onInputChange={(value) => setChipInputs((prev) => ({ ...prev, sets: value }))} onAdd={(value) => addChip("sets", value)} onRemove={(value) => removeChip("sets", value)} placeholder="Add set" />
+            </div>
+
+            <label>
+              Script Text
+              <textarea className="script-text-area" rows={4} value={draft.scriptText} onChange={(event) => setDraft((prev) => ({ ...prev, scriptText: event.target.value }))} />
             </label>
             <label>
-              Props (comma separated)
-              <input type="text" value={draft.props} onChange={(event) => setDraft((prev) => ({ ...prev, props: event.target.value }))} />
+              Notes
+              <textarea value={draft.notes} onChange={(event) => setDraft((prev) => ({ ...prev, notes: event.target.value }))} />
             </label>
-          </div>
-          <div className="editor-row-secondary">
-            <label className="inline-suggest">
-              Props Suggestions
-              <div className="suggest-add">
-                <input
-                  type="text"
-                  list="props-suggestions"
-                  value={quickAddValue.props}
-                  onChange={(event) => setQuickAddValue((prev) => ({ ...prev, props: event.target.value }))}
-                />
-                <button type="button" onClick={() => addQuickSuggestion("props")}>Add</button>
-              </div>
+            <label className="inline-check">
+              <input type="checkbox" checked={draft.needsReview} onChange={(event) => setDraft((prev) => ({ ...prev, needsReview: event.target.checked }))} /> Needs Review
             </label>
-            <label>
-              Wardrobe (comma separated)
-              <input type="text" value={draft.wardrobe} onChange={(event) => setDraft((prev) => ({ ...prev, wardrobe: event.target.value }))} />
-            </label>
-            <label className="inline-suggest">
-              Wardrobe Suggestions
-              <div className="suggest-add">
-                <input
-                  type="text"
-                  list="wardrobe-suggestions"
-                  value={quickAddValue.wardrobe}
-                  onChange={(event) => setQuickAddValue((prev) => ({ ...prev, wardrobe: event.target.value }))}
-                />
-                <button type="button" onClick={() => addQuickSuggestion("wardrobe")}>Add</button>
-              </div>
-            </label>
-          </div>
-          <label>
-            Script Text
-            <textarea className="script-text-area" rows={4} value={draft.scriptText} onChange={(event) => setDraft((prev) => ({ ...prev, scriptText: event.target.value }))} />
-          </label>
-          <label>
-            Notes
-            <textarea value={draft.notes} onChange={(event) => setDraft((prev) => ({ ...prev, notes: event.target.value }))} />
-          </label>
-          <label className="inline-check">
-            <input type="checkbox" checked={draft.needsReview} onChange={(event) => setDraft((prev) => ({ ...prev, needsReview: event.target.checked }))} />
-            Needs Review
-          </label>
-          <datalist id="cast-suggestions">
-            {castSuggestions.map((value) => (
-              <option key={value} value={value} />
-            ))}
-          </datalist>
-          <datalist id="location-suggestions">
-            {locationSuggestions.map((value) => (
-              <option key={value} value={value} />
-            ))}
-          </datalist>
-          <datalist id="props-suggestions">
-            {propsSuggestions.map((value) => (
-              <option key={value} value={value} />
-            ))}
-          </datalist>
-          <datalist id="wardrobe-suggestions">
-            {wardrobeSuggestions.map((value) => (
-              <option key={value} value={value} />
-            ))}
-          </datalist>
-        </form>
-      </section>
+          </form>
+        </section>
       ) : null}
 
       {showElementsView ? (
@@ -636,20 +489,15 @@ export function Stripboard({
                 <option value="location">Location</option>
                 <option value="props">Props</option>
                 <option value="wardrobe">Wardrobe</option>
+                <option value="sets">Sets</option>
               </select>
             </label>
           </div>
           <div className="entity-layout">
             <div className="entity-list">
               {entityList.map((item) => (
-                <button
-                  key={item.value}
-                  type="button"
-                  className={selectedEntity === item.value ? "entity-item active" : "entity-item"}
-                  onClick={() => setSelectedEntity(item.value)}
-                >
-                  <span>{item.value}</span>
-                  <span>{item.count}</span>
+                <button key={item.value} type="button" className={selectedEntity === item.value ? "entity-item active" : "entity-item"} onClick={() => setSelectedEntity(item.value)}>
+                  <span>{item.value}</span><span>{item.count}</span>
                 </button>
               ))}
             </div>
@@ -667,25 +515,24 @@ export function Stripboard({
 
       {reportView === "stripboard" ? (
         <div className="stripboard-layout">
-        <div className="board-shell">
-          <section className="column unscheduled-column" onDragOver={(event) => event.preventDefault()} onDrop={() => onDrop(UNSCHEDULED_DAY)}>
-            <h3>{UNSCHEDULED_DAY} <span className="day-total">{formatPageEighths(getDayTotalEighths(stripsByDay[UNSCHEDULED_DAY] ?? []))} pages</span></h3>
-            {(stripsByDay[UNSCHEDULED_DAY] ?? []).map((strip) => renderStrip(strip, UNSCHEDULED_DAY))}
-          </section>
-
-          <div className="shooting-days-stack">
-            {shootingDays.map((day) => {
-              const dayStrips = stripsByDay[day] ?? [];
-              return (
-                <section key={day} className="column shooting-day-column" onDragOver={(event) => event.preventDefault()} onDrop={() => onDrop(day)}>
-                  <h3>{day} <span className="day-total">{formatPageEighths(getDayTotalEighths(dayStrips))} pages</span></h3>
-                  {dayStrips.map((strip) => renderStrip(strip, day))}
-                </section>
-              );
-            })}
+          <div className="board-shell">
+            <section className="column unscheduled-column" onDragOver={(event) => event.preventDefault()} onDrop={() => onDrop(UNSCHEDULED_DAY)}>
+              <h3>{UNSCHEDULED_DAY} <span className="day-total">{formatPageEighths(getDayTotalEighths(stripsByDay[UNSCHEDULED_DAY] ?? []))} pages</span></h3>
+              {(stripsByDay[UNSCHEDULED_DAY] ?? []).map((strip) => renderStrip(strip, UNSCHEDULED_DAY))}
+            </section>
+            <div className="shooting-days-stack">
+              {shootingDays.map((day) => {
+                const dayStrips = stripsByDay[day] ?? [];
+                return (
+                  <section key={day} className="column shooting-day-column" onDragOver={(event) => event.preventDefault()} onDrop={() => onDrop(day)}>
+                    <h3>{day} <span className="day-total">{formatPageEighths(getDayTotalEighths(dayStrips))} pages</span></h3>
+                    {dayStrips.map((strip) => renderStrip(strip, day))}
+                  </section>
+                );
+              })}
+            </div>
           </div>
         </div>
-      </div>
       ) : null}
     </div>
   );

@@ -1,10 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ParseUploader } from "./components/ParseUploader";
+import { SceneReviewMode } from "./components/SceneReviewMode";
 import { Stripboard } from "./components/Stripboard";
 
 const STORAGE_KEY = "toyshop_scheduling_workspace_v1";
 const DEFAULT_SCHEDULE_DAYS = ["Day 1", "Day 2"];
 const UNSCHEDULED_DAY = "Unscheduled";
+const API_BASE_CANDIDATES = [
+  import.meta.env.VITE_API_BASE_URL,
+  "http://localhost:8000",
+  "http://localhost:8001",
+].filter(Boolean);
 
 function createId(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -152,6 +158,29 @@ function loadWorkspace() {
   }
 }
 
+function parseCsvList(value) {
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function toCsv(values) {
+  return (Array.isArray(values) ? values : [])
+    .map((item) => String(item || "").trim())
+    .filter(Boolean)
+    .join(",");
+}
+
+function extractDbId(prefixedId, prefix) {
+  const raw = String(prefixedId || "");
+  if (!raw.startsWith(prefix)) {
+    return null;
+  }
+  const numeric = Number.parseInt(raw.slice(prefix.length), 10);
+  return Number.isNaN(numeric) ? null : numeric;
+}
+
 function buildStripFromParsedScene(scene, index, fallbackIdPrefix = "scene") {
   const scriptText = scene.scene_text || "";
   return {
@@ -162,7 +191,7 @@ function buildStripFromParsedScene(scene, index, fallbackIdPrefix = "scene") {
     cast: Array.isArray(scene.cast) ? scene.cast : [],
     needsReview: Boolean(scene.needs_review),
     pageEighths: estimateVisualPageEighths(scriptText),
-    intExt: inferIntExt(scene.heading),
+    intExt: scene.int_ext || inferIntExt(scene.heading),
     timeOfDay: inferTimeOfDay(scene.heading, scene.time_of_day),
     props: [],
     wardrobe: [],
@@ -172,16 +201,60 @@ function buildStripFromParsedScene(scene, index, fallbackIdPrefix = "scene") {
   };
 }
 
+function buildParsedSceneFromStrip(strip, index) {
+  return {
+    scene_number: Number(strip.sceneNumber) || index + 1,
+    heading: strip.heading || "",
+    location: strip.location || "",
+    int_ext: strip.intExt || inferIntExt(strip.heading),
+    time_of_day: strip.timeOfDay || "DAY",
+    scene_text: strip.scriptText || "",
+    cast: Array.isArray(strip.cast) ? strip.cast : [],
+    needs_review: Boolean(strip.needsReview),
+  };
+}
+
 export default function App() {
   const [workspace, setWorkspace] = useState(loadWorkspace);
   const [activeView, setActiveView] = useState("schedule");
   const [reportView, setReportView] = useState("stripboard");
   const [selectedFullScriptSceneId, setSelectedFullScriptSceneId] = useState(null);
+  const [reviewQueue, setReviewQueue] = useState([]);
+  const [dbStatus, setDbStatus] = useState("");
+  const [parseStatus, setParseStatus] = useState("");
   const parseUploaderRef = useRef(null);
+  const menuBarRef = useRef(null);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(workspace));
   }, [workspace]);
+
+  useEffect(() => {
+    function closeMenusIfOutside(event) {
+      const menuBar = menuBarRef.current;
+      if (!menuBar) return;
+      if (menuBar.contains(event.target)) return;
+      for (const node of menuBar.querySelectorAll("details.menu-group[open]")) {
+        node.removeAttribute("open");
+      }
+    }
+
+    function closeMenusOnEscape(event) {
+      if (event.key !== "Escape") return;
+      const menuBar = menuBarRef.current;
+      if (!menuBar) return;
+      for (const node of menuBar.querySelectorAll("details.menu-group[open]")) {
+        node.removeAttribute("open");
+      }
+    }
+
+    document.addEventListener("pointerdown", closeMenusIfOutside);
+    document.addEventListener("keydown", closeMenusOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeMenusIfOutside);
+      document.removeEventListener("keydown", closeMenusOnEscape);
+    };
+  }, []);
 
   const activeProject = useMemo(() => {
     return workspace.projects.find((project) => project.id === workspace.activeProjectId) ?? workspace.projects[0];
@@ -231,6 +304,185 @@ export default function App() {
 
   const needsReview = useMemo(() => allStrips.filter((strip) => strip.needsReview).length, [allStrips]);
 
+  async function fetchJson(path, init) {
+    let lastError = null;
+    for (const baseUrl of API_BASE_CANDIDATES) {
+      try {
+        const response = await fetch(`${baseUrl}${path}`, init);
+        if (!response.ok) {
+          lastError = new Error(`HTTP ${response.status} from ${baseUrl}${path}`);
+          continue;
+        }
+        const payload = await response.json();
+        return { payload, baseUrl };
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError ?? new Error(`Request failed for ${path}`);
+  }
+
+  function buildWorkspaceFromDb(projects, schedules, scenesBySchedule) {
+    const mappedProjects = projects.map((project, projectIndex) => {
+      const projectSchedules = schedules
+        .filter((schedule) => schedule.project_id === project.id)
+        .map((schedule, scheduleIndex) => {
+          const dbScenes = (scenesBySchedule[schedule.id] || []).sort((a, b) => {
+            if ((a.source_order ?? 0) !== (b.source_order ?? 0)) {
+              return (a.source_order ?? 0) - (b.source_order ?? 0);
+            }
+            return (a.scene_number ?? 0) - (b.scene_number ?? 0);
+          });
+
+          const strips = dbScenes.map((scene, orderIndex) => {
+            const scriptText = scene.script_text || "";
+            return {
+              id: `db-scene-${scene.id}`,
+              sceneNumber: scene.scene_number,
+              heading: scene.heading,
+              location: scene.location || "",
+              cast: parseCsvList(scene.cast_csv),
+              needsReview: parseCsvList(scene.cast_csv).length === 0,
+              pageEighths: Number.isFinite(scene.page_eighths)
+                ? Math.max(1, scene.page_eighths)
+                : estimateVisualPageEighths(scriptText),
+              intExt: scene.int_ext || inferIntExt(scene.heading),
+              timeOfDay: scene.time_of_day || inferTimeOfDay(scene.heading, null),
+              props: parseCsvList(scene.props_csv),
+              wardrobe: parseCsvList(scene.wardrobe_csv),
+              sets: parseCsvList(scene.sets_csv),
+              notes: scene.notes || "",
+              scriptText,
+              sourceOrder: Number.isFinite(scene.source_order) ? scene.source_order : orderIndex,
+            };
+          });
+
+          return {
+            id: `db-schedule-${schedule.id}`,
+            name: schedule.name || `Schedule ${scheduleIndex + 1}`,
+            days: [UNSCHEDULED_DAY, ...DEFAULT_SCHEDULE_DAYS],
+            stripsByDay: {
+              [UNSCHEDULED_DAY]: strips,
+              "Day 1": [],
+              "Day 2": [],
+            },
+          };
+        });
+
+      const fallbackSchedule = createSchedule("Schedule 1");
+      const safeSchedules = projectSchedules.length ? projectSchedules : [fallbackSchedule];
+      return {
+        id: `db-project-${project.id}`,
+        name: project.name || `Project ${projectIndex + 1}`,
+        schedules: safeSchedules,
+        activeScheduleId: safeSchedules[0].id,
+      };
+    });
+
+    const finalProjects = mappedProjects.length ? mappedProjects : [createProject("Project 1")];
+    return {
+      projects: finalProjects,
+      activeProjectId: finalProjects[0].id,
+    };
+  }
+
+  async function loadDbWorkspace() {
+    setDbStatus("Loading DB data...");
+    try {
+      const { payload: projectPayload, baseUrl } = await fetchJson("/dev/projects");
+      const projects = Array.isArray(projectPayload.projects) ? projectPayload.projects : [];
+      const { payload: schedulePayload } = await fetchJson("/dev/schedules");
+      const schedules = Array.isArray(schedulePayload.schedules) ? schedulePayload.schedules : [];
+
+      const scenesBySchedule = {};
+      await Promise.all(
+        schedules.map(async (schedule) => {
+          const { payload } = await fetchJson(`/dev/schedules/${schedule.id}/scenes`);
+          scenesBySchedule[schedule.id] = Array.isArray(payload.scenes) ? payload.scenes : [];
+        })
+      );
+
+      setWorkspace(buildWorkspaceFromDb(projects, schedules, scenesBySchedule));
+      setActiveView("schedule");
+      setReportView("stripboard");
+      setDbStatus(`Loaded DB data from ${baseUrl}`);
+    } catch (error) {
+      setDbStatus(`DB load failed: ${error instanceof Error ? error.message : "Unknown error"}`);
+    }
+  }
+
+  async function seedAndLoadDbWorkspace() {
+    setDbStatus("Seeding DB test data...");
+    try {
+      await fetchJson("/dev/seed-test-data", { method: "POST" });
+      await loadDbWorkspace();
+    } catch (error) {
+      setDbStatus(`Seed failed: ${error instanceof Error ? error.message : "Unknown error"}`);
+    }
+  }
+
+  async function saveActiveScheduleToDb() {
+    if (!activeProject || !activeSchedule) {
+      return;
+    }
+
+    const dbScheduleId = extractDbId(activeSchedule.id, "db-schedule-");
+    if (!dbScheduleId) {
+      setDbStatus("Save failed: active schedule is not DB-backed. Use Load Test Data first.");
+      return;
+    }
+
+    try {
+      setDbStatus("Saving active schedule to DB...");
+      const sceneRows = Object.values(activeSchedule.stripsByDay)
+        .flat()
+        .sort((a, b) => {
+          const aOrder = Number.isFinite(a.sourceOrder) ? a.sourceOrder : Number.MAX_SAFE_INTEGER;
+          const bOrder = Number.isFinite(b.sourceOrder) ? b.sourceOrder : Number.MAX_SAFE_INTEGER;
+          if (aOrder !== bOrder) {
+            return aOrder - bOrder;
+          }
+          return Number(a.sceneNumber) - Number(b.sceneNumber);
+        })
+        .map((scene, index) => ({
+          scene_number: Number(scene.sceneNumber) || index + 1,
+          heading: scene.heading || "",
+          location: scene.location || "",
+          int_ext: scene.intExt || "INT",
+          time_of_day: scene.timeOfDay || "DAY",
+          page_eighths: Number.isFinite(scene.pageEighths) ? scene.pageEighths : 1,
+          cast_csv: toCsv(scene.cast),
+          props_csv: toCsv(scene.props),
+          wardrobe_csv: toCsv(scene.wardrobe),
+          sets_csv: toCsv(scene.sets),
+          notes: scene.notes || "",
+          script_text: scene.scriptText || "",
+          source_order: Number.isFinite(scene.sourceOrder) ? scene.sourceOrder : index,
+        }));
+
+      const { payload } = await fetchJson(`/dev/schedules/${dbScheduleId}/scenes`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scenes: sceneRows }),
+      });
+      setDbStatus(`Saved ${payload.saved_scenes ?? sceneRows.length} scenes to DB schedule ${dbScheduleId}`);
+    } catch (error) {
+      setDbStatus(`Save failed: ${error instanceof Error ? error.message : "Unknown error"}`);
+    }
+  }
+
+  async function saveReviewFeedback(payload) {
+    try {
+      await fetchJson("/dev/review/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    } catch {
+      // Keep review flow non-blocking if feedback API is unavailable.
+    }
+  }
+
   function updateActiveSchedule(mutator) {
     setWorkspace((prev) => {
       const projects = prev.projects.map((project) => {
@@ -258,6 +510,66 @@ export default function App() {
     updateActiveSchedule((schedule) => {
       const scheduledDays = schedule.days.filter((day) => day !== UNSCHEDULED_DAY);
       const days = [...scheduledDays, UNSCHEDULED_DAY];
+      const stripsByDay = {};
+      for (const day of days) {
+        stripsByDay[day] = [];
+      }
+      stripsByDay[UNSCHEDULED_DAY] = unscheduled;
+      return { ...schedule, days, stripsByDay };
+    });
+  }
+
+  function startReview(parsedScenes) {
+    setReviewQueue(Array.isArray(parsedScenes) ? parsedScenes : []);
+    setActiveView("review");
+  }
+
+  function startReviewFromCurrentSchedule() {
+    const parsedScenes = Object.values(activeSchedule.stripsByDay)
+      .flat()
+      .sort((a, b) => {
+        const aOrder = Number.isFinite(a.sourceOrder) ? a.sourceOrder : Number.MAX_SAFE_INTEGER;
+        const bOrder = Number.isFinite(b.sourceOrder) ? b.sourceOrder : Number.MAX_SAFE_INTEGER;
+        if (aOrder !== bOrder) {
+          return aOrder - bOrder;
+        }
+        return Number(a.sceneNumber) - Number(b.sceneNumber);
+      })
+      .map((strip, index) => buildParsedSceneFromStrip(strip, index));
+
+    if (!parsedScenes.length) {
+      setDbStatus("No scenes available to review. Import or load scenes first.");
+      return;
+    }
+
+    startReview(parsedScenes);
+  }
+
+  function applyReviewedScenes(reviewedScenes) {
+    const unscheduled = (Array.isArray(reviewedScenes) ? reviewedScenes : []).map((scene, index) => {
+      const scriptText = scene.scene_text || "";
+      return {
+        id: createId("reviewed"),
+        sceneNumber: scene.scene_number,
+        heading: scene.heading,
+        location: scene.location || "",
+        cast: Array.isArray(scene.cast) ? scene.cast : [],
+        needsReview: !(Array.isArray(scene.cast) && scene.cast.length),
+        pageEighths: estimateVisualPageEighths(scriptText),
+        intExt: scene.int_ext || inferIntExt(scene.heading),
+        timeOfDay: inferTimeOfDay(scene.heading, scene.time_of_day),
+        props: Array.isArray(scene.props) ? scene.props : [],
+        wardrobe: Array.isArray(scene.wardrobe) ? scene.wardrobe : [],
+        sets: Array.isArray(scene.sets) ? scene.sets : [],
+        notes: scene.notes || "",
+        scriptText,
+        sourceOrder: Number.isFinite(scene.source_order) ? scene.source_order : index,
+      };
+    });
+
+    updateActiveSchedule((schedule) => {
+      const scheduledDays = schedule.days.filter((day) => day !== UNSCHEDULED_DAY);
+      const days = [UNSCHEDULED_DAY, ...scheduledDays];
       const stripsByDay = {};
       for (const day of days) {
         stripsByDay[day] = [];
@@ -298,7 +610,7 @@ export default function App() {
             location: scene.location,
             cast: Array.isArray(scene.cast) ? scene.cast : [],
             needsReview: Boolean(scene.needs_review),
-            intExt: inferIntExt(scene.heading),
+            intExt: scene.int_ext || inferIntExt(scene.heading),
             timeOfDay: inferTimeOfDay(scene.heading, scene.time_of_day),
             scriptText: scene.scene_text || "",
             pageEighths: estimateVisualPageEighths(scene.scene_text || ""),
@@ -480,7 +792,7 @@ export default function App() {
       </header>
 
       <section className="panel menu-bar-panel">
-        <div className="menu-bar">
+        <div className="menu-bar" ref={menuBarRef}>
           <details className="menu-group">
             <summary>File</summary>
             <div className="menu-content">
@@ -501,6 +813,10 @@ export default function App() {
               <button type="button" onClick={renameActiveProject}>Rename Project</button>
               <button type="button" onClick={() => parseUploaderRef.current?.openImport()}>Import Script</button>
               <button type="button" onClick={() => parseUploaderRef.current?.openUpdate()}>Update Script</button>
+              <button type="button" onClick={startReviewFromCurrentSchedule}>Scene Review</button>
+              <button type="button" onClick={seedAndLoadDbWorkspace}>Seed Test Data</button>
+              <button type="button" onClick={loadDbWorkspace}>Load Test Data</button>
+              <button type="button" onClick={saveActiveScheduleToDb}>Save Active Schedule to DB</button>
             </div>
           </details>
 
@@ -552,11 +868,12 @@ export default function App() {
         <ParseUploader
           ref={parseUploaderRef}
           showControls={false}
+          onStatusChange={setParseStatus}
           onParsed={(payload) => {
-            hydrateStrips(payload.scenes);
+            startReview(payload.scenes);
           }}
           onRescanned={(payload) => {
-            rescanAndMergeStrips(payload.scenes);
+            startReview(payload.scenes);
           }}
         />
         <div className="stats">
@@ -572,8 +889,12 @@ export default function App() {
                   : "Character Report"
               : activeView === "elements"
                 ? "Elements View"
-                : "Full Script"}
+                : activeView === "fullScript"
+                  ? "Full Script"
+                  : "Review"}
           </span>
+          {dbStatus ? <span><strong>DB:</strong> {dbStatus}</span> : null}
+          {parseStatus ? <span><strong>Parse:</strong> {parseStatus}</span> : null}
         </div>
       </section>
 
@@ -608,6 +929,7 @@ export default function App() {
                   <p><strong>Cast:</strong> {(selectedFullScriptScene.cast ?? []).join(", ") || "None"}</p>
                   <p><strong>Props:</strong> {(selectedFullScriptScene.props ?? []).join(", ") || "None"}</p>
                   <p><strong>Wardrobe:</strong> {(selectedFullScriptScene.wardrobe ?? []).join(", ") || "None"}</p>
+                  <p><strong>Sets:</strong> {(selectedFullScriptScene.sets ?? []).join(", ") || "None"}</p>
                   <p><strong>Notes:</strong> {selectedFullScriptScene.notes || "None"}</p>
                   <pre className="full-script-scene-text">{selectedFullScriptScene.scriptText || ""}</pre>
                 </div>
@@ -629,6 +951,23 @@ export default function App() {
             showWorkbench={false}
           />
         </section>
+      ) : null}
+
+      {activeView === "review" ? (
+        <SceneReviewMode
+          parsedScenes={reviewQueue}
+          onSaveFeedback={saveReviewFeedback}
+          onComplete={(reviewedScenes) => {
+            applyReviewedScenes(reviewedScenes);
+            setReviewQueue([]);
+            setActiveView("schedule");
+            setReportView("stripboard");
+          }}
+          onCancel={() => {
+            setReviewQueue([]);
+            setActiveView("schedule");
+          }}
+        />
       ) : null}
 
       {activeView === "schedule" ? (

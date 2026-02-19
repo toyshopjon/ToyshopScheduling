@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BACKEND_DIR="$ROOT_DIR/backend"
+FRONTEND_DIR="$ROOT_DIR/frontend"
+BACKEND_VENV="$BACKEND_DIR/.venv"
+BACKEND_LOG="$ROOT_DIR/.toyssched-backend.log"
+
+pick_port() {
+  local start_port="$1"
+  local port="$start_port"
+  while lsof -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; do
+    port=$((port + 1))
+  done
+  printf "%s" "$port"
+}
+
+BACKEND_PORT="${BACKEND_PORT:-$(pick_port 8000)}"
+FRONTEND_PORT="${FRONTEND_PORT:-$(pick_port 5173)}"
+
+echo "toyssched: root=$ROOT_DIR"
+echo "toyssched: backend port=$BACKEND_PORT frontend port=$FRONTEND_PORT"
+
+if [[ ! -d "$BACKEND_VENV" ]]; then
+  echo "toyssched: creating backend venv..."
+  python3 -m venv "$BACKEND_VENV"
+fi
+
+echo "toyssched: installing backend dependencies..."
+(
+  cd "$BACKEND_DIR"
+  # shellcheck source=/dev/null
+  source "$BACKEND_VENV/bin/activate"
+  pip install -r requirements.txt >/dev/null
+)
+
+if [[ ! -d "$FRONTEND_DIR/node_modules" ]]; then
+  echo "toyssched: installing frontend dependencies..."
+  (cd "$FRONTEND_DIR" && npm install >/dev/null)
+fi
+
+echo "toyssched: starting backend..."
+(
+  cd "$BACKEND_DIR"
+  # shellcheck source=/dev/null
+  source "$BACKEND_VENV/bin/activate"
+  exec python -m uvicorn app.main:app --reload --port "$BACKEND_PORT"
+) >"$BACKEND_LOG" 2>&1 &
+BACKEND_PID="$!"
+
+cleanup() {
+  if kill -0 "$BACKEND_PID" >/dev/null 2>&1; then
+    kill "$BACKEND_PID" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT INT TERM
+
+for _ in {1..40}; do
+  if curl -fsS "http://localhost:$BACKEND_PORT/health" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.25
+done
+
+if ! curl -fsS "http://localhost:$BACKEND_PORT/health" >/dev/null 2>&1; then
+  echo "toyssched: backend failed to start. See $BACKEND_LOG"
+  exit 1
+fi
+
+echo "toyssched: backend ready at http://localhost:$BACKEND_PORT"
+echo "toyssched: frontend starting at http://localhost:$FRONTEND_PORT"
+echo "toyssched: backend logs -> $BACKEND_LOG"
+
+cd "$FRONTEND_DIR"
+VITE_API_BASE_URL="http://localhost:$BACKEND_PORT" npm run dev -- --port "$FRONTEND_PORT"

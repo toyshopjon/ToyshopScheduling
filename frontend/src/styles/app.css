@@ -356,6 +356,66 @@ body {
   grid-template-columns: repeat(3, minmax(18ch, 1fr));
 }
 
+.chip-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(5, minmax(180px, 1fr));
+}
+
+.chip-editor {
+  border: 1px solid #cfd8e8;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 8px;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.chip-editor-header {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #2b3648;
+}
+
+.chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 32px;
+}
+
+.chip {
+  border: 1px solid #9fb1cf;
+  background: #eef3ff;
+  color: #1a2d4e;
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 12px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.chip-x {
+  font-weight: 700;
+}
+
+.chip-empty {
+  font-size: 12px;
+  color: #677489;
+}
+
+.chip-controls {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+}
+
 .field-page-count input {
   min-width: 12ch;
 }
@@ -369,10 +429,51 @@ body {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
+.review-script-text {
+  width: 100%;
+  box-sizing: border-box;
+  display: block;
+  height: 46vh;
+  min-height: 300px;
+  resize: vertical;
+  white-space: pre;
+  tab-size: 4;
+}
+
+.review-row-primary label {
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+}
+
+.review-row-primary input,
+.review-row-primary select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 8px;
+  border: 1px solid #cfd8e8;
+  border-radius: 6px;
+  font: inherit;
+}
+
 .editor-actions {
   display: grid;
   gap: 6px;
   grid-template-columns: repeat(4, 1fr);
+}
+
+.review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.review-hint {
+  border: 1px solid #d3dbe6;
+  border-radius: 6px;
+  background: #f8fbff;
+  padding: 6px 8px;
 }
 
 .inline-suggest .suggest-add {
@@ -462,6 +563,10 @@ body {
 
   .editor-row-primary,
   .editor-row-secondary {
+    grid-template-columns: 1fr;
+  }
+
+  .chip-grid {
     grid-template-columns: 1fr;
   }
 
