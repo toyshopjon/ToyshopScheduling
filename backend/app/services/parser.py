@@ -1,7 +1,9 @@
 import io
 import re
 from dataclasses import dataclass
+from typing import Callable
 
+import pdfplumber
 from pypdf import PdfReader
 
 SCENE_HEADING_PATTERN = re.compile(
@@ -9,6 +11,19 @@ SCENE_HEADING_PATTERN = re.compile(
     r"(?P<location>.+?)"
     r"\s*[-–]\s*"
     r"(?P<time>DAY|NIGHT|DAWN|DUSK|MORNING|EVENING)\s*$",
+    re.IGNORECASE,
+)
+SCENE_PREFIX_PATTERN = re.compile(
+    r"^(?P<prefix>INT\.?|EXT\.?|INT\s*/\s*EXT\.?|EXT\s*/\s*INT\.?)\b",
+    re.IGNORECASE,
+)
+PAGE_NUMBER_PATTERN = re.compile(
+    r"^(?:"
+    r"\(?\d{1,4}[A-Z]?\)?"
+    r"|PAGE\s+\d{1,4}[A-Z]?"
+    r"|-\s*\d{1,4}[A-Z]?\s*-"
+    r"|\d{1,4}[A-Z]?\s*/\s*\d{1,4}[A-Z]?"
+    r")\.?$",
     re.IGNORECASE,
 )
 
@@ -50,21 +65,61 @@ class Scene:
 
 
 class ScriptParser:
-    def parse_pdf(self, payload: bytes) -> dict:
-        text = self._extract_text(payload)
-        scenes = self._split_into_scenes(text)
+    def parse_pdf(
+        self,
+        payload: bytes,
+        progress_callback: Callable[[int, str], None] | None = None,
+        alias_map: dict[str, str] | None = None,
+    ) -> dict:
+        if progress_callback:
+            progress_callback(0, "Opening PDF...")
+        text = self._extract_text(payload, progress_callback)
+        scenes = self._split_into_scenes(text, progress_callback, alias_map or {})
         serialized = [self._serialize(scene) for scene in scenes]
+        if progress_callback:
+            progress_callback(100, "Serialization complete.")
         return {
             "scenes": serialized,
             "needs_review_count": sum(1 for scene in scenes if scene.needs_review),
         }
 
-    def _extract_text(self, payload: bytes) -> str:
-        reader = PdfReader(io.BytesIO(payload))
-        pages = [page.extract_text() or "" for page in reader.pages]
-        return "\n".join(pages)
+    def _extract_text(
+        self,
+        payload: bytes,
+        progress_callback: Callable[[int, str], None] | None = None,
+    ) -> str:
+        # pdfplumber/pdfminer layout extraction preserves screenplay whitespace
+        # more reliably than pypdf for indents, spacing, and line structure.
+        try:
+            with pdfplumber.open(io.BytesIO(payload)) as pdf:
+                page_count = len(pdf.pages)
+                pages: list[str] = []
+                for page_index, page in enumerate(pdf.pages, start=1):
+                    page_text = page.extract_text(layout=True) or ""
+                    pages.append(page_text)
+                    if progress_callback and page_count:
+                        progress = int((page_index / page_count) * 65)
+                        progress_callback(progress, f"Reading PDF pages ({page_index}/{page_count})...")
+                return "\n".join(pages)
+        except Exception:
+            # Fallback keeps parser resilient if pdfplumber fails on a file.
+            reader = PdfReader(io.BytesIO(payload))
+            page_count = len(reader.pages)
+            pages = []
+            for page_index, page in enumerate(reader.pages, start=1):
+                pages.append(page.extract_text() or "")
+                if progress_callback and page_count:
+                    progress = int((page_index / page_count) * 65)
+                    progress_callback(progress, f"Reading PDF pages ({page_index}/{page_count})...")
+            return "\n".join(pages)
 
-    def _split_into_scenes(self, text: str) -> list[Scene]:
+    def _split_into_scenes(
+        self,
+        text: str,
+        progress_callback: Callable[[int, str], None] | None = None,
+        alias_map: dict[str, str] | None = None,
+    ) -> list[Scene]:
+        alias_map = alias_map or {}
         lines = text.splitlines()
         scenes: list[Scene] = []
 
@@ -75,10 +130,23 @@ class ScriptParser:
         scene_lines: list[str] = []
         all_speaking_characters: set[str] = set()
 
-        for raw_line in lines:
+        total_lines = max(1, len(lines))
+        last_line_progress = -1
+        for line_index, raw_line in enumerate(lines, start=1):
             stripped_line = raw_line.strip()
-            heading_match = SCENE_HEADING_PATTERN.match(stripped_line)
-            if heading_match:
+            if self._is_page_number_line(stripped_line):
+                if progress_callback:
+                    line_progress = 65 + int((line_index / total_lines) * 25)
+                    if line_progress != last_line_progress:
+                        progress_callback(
+                            line_progress,
+                            f"Scanning script lines ({line_index}/{total_lines})...",
+                        )
+                        last_line_progress = line_progress
+                continue
+
+            if self._is_scene_heading_line(stripped_line):
+                location, time_of_day = self._extract_heading_fields(stripped_line)
                 if active_heading:
                     scenes.append(
                         self._make_scene(
@@ -91,18 +159,25 @@ class ScriptParser:
                         )
                     )
                 active_heading = stripped_line
-                active_location = heading_match.group("location").strip().upper()
-                active_time = heading_match.group("time").strip().upper()
+                active_location = location
+                active_time = time_of_day
                 speaking_cast = set()
                 scene_lines = [raw_line]
-                continue
-
-            if active_heading:
+            elif active_heading:
                 scene_lines.append(raw_line)
                 cue_name = self._extract_character_cue(stripped_line)
                 if cue_name:
-                    speaking_cast.add(cue_name)
-                    all_speaking_characters.add(cue_name)
+                    canonical = self._canonicalize_alias(cue_name, alias_map)
+                    speaking_cast.add(canonical)
+                    all_speaking_characters.add(canonical)
+            if progress_callback:
+                line_progress = 65 + int((line_index / total_lines) * 25)
+                if line_progress != last_line_progress:
+                    progress_callback(
+                        line_progress,
+                        f"Scanning script lines ({line_index}/{total_lines})...",
+                    )
+                    last_line_progress = line_progress
 
         if active_heading:
             scenes.append(
@@ -116,10 +191,20 @@ class ScriptParser:
                 )
             )
 
-        return [self._augment_scene_cast(scene, all_speaking_characters) for scene in scenes]
+        augmented_scenes: list[Scene] = []
+        total_scenes = max(1, len(scenes))
+        for scene_index, scene in enumerate(scenes, start=1):
+            augmented_scenes.append(self._augment_scene_cast(scene, all_speaking_characters, alias_map))
+            if progress_callback:
+                progress = 90 + int((scene_index / total_scenes) * 9)
+                progress_callback(progress, f"Resolving cast and elements ({scene_index}/{total_scenes})...")
+        return augmented_scenes
 
     def _extract_character_cue(self, stripped_line: str) -> str | None:
         if not stripped_line:
+            return None
+
+        if self._is_page_number_line(stripped_line):
             return None
 
         line = stripped_line.rstrip(":").strip()
@@ -130,6 +215,9 @@ class ScriptParser:
         if not re.fullmatch(r"[A-Z0-9 .'\-()]+", line):
             return None
 
+        if not any(char.isalpha() for char in line):
+            return None
+
         line = TRAILING_PAREN_PATTERN.sub("", line).strip()
         line = re.sub(r"\s+", " ", line)
         if not line or line in STOP_CHARACTER_TOKENS:
@@ -137,7 +225,7 @@ class ScriptParser:
 
         return line
 
-    def _extract_intro_mentions(self, raw_line: str) -> set[str]:
+    def _extract_intro_mentions(self, raw_line: str, alias_map: dict[str, str]) -> set[str]:
         stripped = raw_line.strip()
         if not stripped:
             return set()
@@ -153,7 +241,7 @@ class ScriptParser:
             token = TRAILING_PAREN_PATTERN.sub("", token).strip()
             if not token or token in STOP_CHARACTER_TOKENS:
                 continue
-            mentions.add(token)
+            mentions.add(self._canonicalize_alias(token, alias_map))
         return mentions
 
     def _find_speaking_mentions(self, raw_line: str, speaking_characters: set[str]) -> set[str]:
@@ -167,15 +255,15 @@ class ScriptParser:
                 found.add(name)
         return found
 
-    def _augment_scene_cast(self, scene: Scene, speaking_characters: set[str]) -> Scene:
+    def _augment_scene_cast(self, scene: Scene, speaking_characters: set[str], alias_map: dict[str, str]) -> Scene:
         cast = set(scene.cast)
         for raw_line in scene.scene_text.split("\n"):
             stripped_line = raw_line.strip()
-            heading_match = SCENE_HEADING_PATTERN.match(stripped_line)
-            if heading_match:
+            if self._is_scene_heading_line(stripped_line):
                 continue
-            cast.update(self._extract_intro_mentions(raw_line))
+            cast.update(self._extract_intro_mentions(raw_line, alias_map))
             cast.update(self._find_speaking_mentions(raw_line, speaking_characters))
+            cast.update(self._find_alias_mentions(raw_line, alias_map))
 
         updated_cast = sorted(cast)
         confidence = 0.95 if updated_cast else 0.78
@@ -226,3 +314,66 @@ class ScriptParser:
             "confidence": scene.confidence,
             "needs_review": scene.needs_review,
         }
+
+    def _canonicalize_alias(self, token: str, alias_map: dict[str, str]) -> str:
+        key = str(token or "").strip().upper()
+        if not key:
+            return ""
+        return str(alias_map.get(key) or token).strip()
+
+    def _find_alias_mentions(self, raw_line: str, alias_map: dict[str, str]) -> set[str]:
+        if not alias_map:
+            return set()
+        upper_line = str(raw_line or "").upper()
+        found: set[str] = set()
+        for alias, canonical in alias_map.items():
+            pattern = rf"(?<![A-Z0-9]){re.escape(alias)}(?![A-Z0-9])"
+            if re.search(pattern, upper_line):
+                found.add(canonical)
+        return found
+
+    def _is_page_number_line(self, stripped_line: str) -> bool:
+        if not stripped_line:
+            return False
+        return bool(PAGE_NUMBER_PATTERN.fullmatch(stripped_line))
+
+    def _is_scene_heading_line(self, stripped_line: str) -> bool:
+        if not stripped_line:
+            return False
+        if not SCENE_PREFIX_PATTERN.match(stripped_line):
+            return False
+        # Rule: headings that begin with INT/EXT and are all-caps.
+        has_letter = any(char.isalpha() for char in stripped_line)
+        return has_letter and stripped_line == stripped_line.upper()
+
+    def _extract_heading_fields(self, heading: str) -> tuple[str, str]:
+        exact_match = SCENE_HEADING_PATTERN.match(heading)
+        if exact_match:
+            return (
+                self._clean_location_text(exact_match.group("location")),
+                exact_match.group("time").strip().upper(),
+            )
+
+        prefix_match = SCENE_PREFIX_PATTERN.match(heading)
+        if not prefix_match:
+            return "", "DAY"
+
+        body = heading[prefix_match.end():].strip()
+        time_tokens = {"DAY", "NIGHT", "DAWN", "DUSK", "MORNING", "EVENING", "SUNRISE", "SUNSET"}
+        location = body
+        time_of_day = "DAY"
+
+        parts = [part.strip() for part in body.split("-")]
+        if parts:
+            tail = parts[-1].upper()
+            if tail in time_tokens:
+                time_of_day = tail
+                parts = parts[:-1]
+                location = " - ".join(part for part in parts if part)
+
+        return self._clean_location_text(location), time_of_day
+
+    def _clean_location_text(self, value: str) -> str:
+        cleaned = re.sub(r"^[\s.\-:;]+", "", str(value or ""))
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        return cleaned.upper()

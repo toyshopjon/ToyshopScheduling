@@ -88,3 +88,71 @@ The crowd parts as RIPLEY walks through the rain.
     assert len(scenes) == 2
     assert "RIPLEY" in scenes[0].cast
     assert "RIPLEY" in scenes[1].cast
+
+
+def test_all_caps_int_ext_line_starts_new_scene_even_without_time_suffix() -> None:
+    parser = ScriptParser()
+    text = """
+INT. WAREHOUSE
+RIPLEY
+Stay focused.
+
+EXT. ALLEY
+Wind and rain.
+"""
+    scenes = parser._split_into_scenes(text)
+
+    assert len(scenes) == 2
+    assert scenes[0].heading == "INT. WAREHOUSE"
+    assert scenes[1].heading == "EXT. ALLEY"
+
+
+def test_page_number_lines_are_ignored_from_scene_text() -> None:
+    parser = ScriptParser()
+    text = """
+INT. OFFICE - DAY
+12
+RIPLEY
+We have to move.
+
+EXT. STREET - NIGHT
+13
+Rain falls.
+"""
+    scenes = parser._split_into_scenes(text)
+
+    assert len(scenes) == 2
+    assert "\n12\n" not in f"\n{scenes[0].scene_text}\n"
+    assert "\n13\n" not in f"\n{scenes[1].scene_text}\n"
+
+
+def test_page_number_variants_do_not_become_cast() -> None:
+    parser = ScriptParser()
+    text = """
+INT. STAGE - DAY
+12A
+PAGE 13
+- 14 -
+15/110
+RIPLEY
+Ready.
+"""
+    scenes = parser._split_into_scenes(text)
+
+    assert len(scenes) == 1
+    assert "RIPLEY" in scenes[0].cast
+    assert "12A" not in scenes[0].cast
+    assert "PAGE 13" not in scenes[0].cast
+
+
+def test_location_trims_leading_punctuation_and_space() -> None:
+    parser = ScriptParser()
+    text = """
+INT. .  NEW YORK BAR - NIGHT
+RIPLEY
+Watch the door.
+"""
+    scenes = parser._split_into_scenes(text)
+
+    assert len(scenes) == 1
+    assert scenes[0].location == "NEW YORK BAR"

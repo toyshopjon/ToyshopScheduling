@@ -1,9 +1,33 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 
 const UNSCHEDULED_DAY = "Unscheduled";
 const TIME_OPTIONS = ["DAY", "NIGHT", "DAWN", "DUSK", "MORNING", "EVENING", "SUNRISE", "SUNSET"];
 const INT_EXT_OPTIONS = ["INT", "EXT", "INT/EXT"];
-
+const DEFAULT_LAYOUT = {
+  fieldOrder: ["sceneNumber", "intExt", "timeOfDay", "heading", "location", "cast", "pageCount", "estTime"],
+  rowHeight: 30,
+  colorMode: "dayNight",
+  columnWidths: {
+    sceneNumber: 90,
+    intExt: 70,
+    timeOfDay: 110,
+    heading: 300,
+    location: 220,
+    cast: 260,
+    pageCount: 90,
+    estTime: 90,
+  },
+};
+const FIELD_DEFS = {
+  sceneNumber: { label: "Scene", value: (strip) => String(strip.sceneNumber ?? "") },
+  intExt: { label: "I/E", value: (strip) => strip.intExt || "" },
+  timeOfDay: { label: "Time", value: (strip) => strip.timeOfDay || "" },
+  heading: { label: "Heading", value: (strip) => strip.heading || "" },
+  location: { label: "Location", value: (strip) => strip.location || "" },
+  cast: { label: "Cast", value: (strip) => (strip.cast ?? []).join(", ") },
+  pageCount: { label: "Pages", value: (strip) => formatPageEighths(strip.pageEighths) },
+  estTime: { label: "Est", value: (strip) => formatMinutes(strip.estTimeMinutes) },
+};
 function createStripId(prefix = "scene") {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -13,6 +37,14 @@ function formatPageEighths(totalEighths) {
   const whole = Math.floor(safeTotal / 8);
   const eighths = safeTotal % 8;
   return `${whole} ${eighths}/8`;
+}
+
+function formatMinutes(totalMinutes) {
+  const safeTotal = Number.isFinite(totalMinutes) ? Math.max(0, totalMinutes) : 0;
+  const hours = Math.floor(safeTotal / 60);
+  const minutes = safeTotal % 60;
+  if (!hours) return `${minutes}m`;
+  return `${hours}h ${minutes}m`;
 }
 
 function parsePageCountToEighths(value) {
@@ -55,26 +87,61 @@ function getDayTotalEighths(strips = []) {
   return strips.reduce((total, strip) => total + (Number.isFinite(strip.pageEighths) ? strip.pageEighths : 0), 0);
 }
 
+function getDayTotalMinutes(strips = []) {
+  return strips.reduce((total, strip) => total + (Number.isFinite(strip.estTimeMinutes) ? strip.estTimeMinutes : 0), 0);
+}
+
 function getStripStyle(strip, colorMode) {
   if (colorMode === "none") return {};
   const time = String(strip.timeOfDay || "").toUpperCase();
   const intExt = String(strip.intExt || "").toUpperCase();
 
   if (colorMode === "dayNight") {
-    if (time === "NIGHT") return { backgroundColor: "#3352a1", color: "#ffffff", borderColor: "#22366f" };
+    if (time === "NIGHT") return { backgroundColor: "#3352a1", color: "#ffffff" };
     if (["DAWN", "DUSK", "SUNRISE", "SUNSET"].includes(time)) {
-      return { backgroundColor: "#e17de8", color: "#202020", borderColor: "#b95cc0" };
+      return { backgroundColor: "#e17de8", color: "#202020" };
     }
-    return { backgroundColor: "#efe655", color: "#111111", borderColor: "#b8ad1f" };
+    return { backgroundColor: "#efe655", color: "#111111" };
   }
 
   if (colorMode === "intExt") {
-    if (intExt === "EXT") return { backgroundColor: "#1b9b53", color: "#ffffff", borderColor: "#0f6737" };
-    if (intExt === "INT/EXT") return { backgroundColor: "#a1632f", color: "#ffffff", borderColor: "#77451f" };
-    return { backgroundColor: "#d8dde7", color: "#1a1a1a", borderColor: "#aeb7ca" };
+    if (intExt === "EXT") return { backgroundColor: "#1b9b53", color: "#ffffff" };
+    if (intExt === "INT/EXT") return { backgroundColor: "#a1632f", color: "#ffffff" };
+    return { backgroundColor: "#d8dde7", color: "#1a1a1a" };
   }
 
   return {};
+}
+
+function parseHeadingFields(heading, fallback = {}) {
+  const raw = String(heading || "");
+  const normalized = raw.trim();
+  const match = normalized.match(/^(INT\/EXT|EXT\/INT|INT|EXT)\.?\s*(.*)$/i);
+  if (!match) {
+    return {
+      intExt: fallback.intExt || "INT",
+      location: fallback.location || "",
+      timeOfDay: fallback.timeOfDay || "DAY",
+    };
+  }
+
+  const prefix = match[1].toUpperCase();
+  const body = String(match[2] || "").trim();
+  const tokens = body.split(/\s*-\s*/).map((part) => part.trim()).filter(Boolean);
+  let timeOfDay = fallback.timeOfDay || "DAY";
+  if (tokens.length) {
+    const tail = tokens[tokens.length - 1].toUpperCase();
+    if (TIME_OPTIONS.includes(tail)) {
+      timeOfDay = tail;
+      tokens.pop();
+    }
+  }
+  const location = tokens.join(" - ").replace(/^[\s.\-:;]+/, "").trim();
+  return {
+    intExt: prefix === "EXT/INT" ? "INT/EXT" : prefix,
+    location: location || (fallback.location || ""),
+    timeOfDay,
+  };
 }
 
 function toDraft(strip, day) {
@@ -96,6 +163,7 @@ function toDraft(strip, day) {
     intExt: strip?.intExt || "INT",
     timeOfDay: strip?.timeOfDay || "DAY",
     pageCount: formatPageEighths(totalEighths),
+    estTimeMinutes: String(Number.isFinite(strip?.estTimeMinutes) ? Math.max(0, strip.estTimeMinutes) : 0),
   };
 }
 
@@ -130,18 +198,62 @@ function ChipListEditor({ title, values, suggestions, inputValue, onInputChange,
   );
 }
 
-export function Stripboard({ days, setDays, stripsByDay, setStripsByDay, showElementsView = true, reportView = "stripboard", showWorkbench = true }) {
-  const [dragged, setDragged] = useState(null);
-  const [selectedStripIds, setSelectedStripIds] = useState(new Set());
-  const [colorMode, setColorMode] = useState("dayNight");
+function normalizeLayoutConfig(layoutConfig) {
+  const fieldOrder = Array.isArray(layoutConfig?.fieldOrder) ? layoutConfig.fieldOrder.filter((field) => FIELD_DEFS[field]) : DEFAULT_LAYOUT.fieldOrder;
+  return {
+    fieldOrder: fieldOrder.length ? fieldOrder : DEFAULT_LAYOUT.fieldOrder,
+    rowHeight: Number.isFinite(layoutConfig?.rowHeight) ? Math.max(22, Math.min(84, layoutConfig.rowHeight)) : DEFAULT_LAYOUT.rowHeight,
+    colorMode: ["dayNight", "intExt", "none"].includes(layoutConfig?.colorMode) ? layoutConfig.colorMode : DEFAULT_LAYOUT.colorMode,
+    columnWidths: {
+      ...DEFAULT_LAYOUT.columnWidths,
+      ...(layoutConfig?.columnWidths && typeof layoutConfig.columnWidths === "object" ? layoutConfig.columnWidths : {}),
+    },
+  };
+}
+
+export function Stripboard({
+  days,
+  setDays,
+  stripsByDay,
+  setStripsByDay,
+  showElementsView = true,
+  reportView = "stripboard",
+  showWorkbench = true,
+  layoutConfig,
+  onSaveLayoutConfig,
+  onReturnToStripView,
+}) {
+  const [draggedStrip, setDraggedStrip] = useState(null);
+  const [colorMode, setColorMode] = useState(normalizeLayoutConfig(layoutConfig).colorMode);
+  const [rowHeight, setRowHeight] = useState(normalizeLayoutConfig(layoutConfig).rowHeight);
+  const [fieldOrder, setFieldOrder] = useState(normalizeLayoutConfig(layoutConfig).fieldOrder);
+  const [columnWidths, setColumnWidths] = useState(normalizeLayoutConfig(layoutConfig).columnWidths);
+  const [dragFieldKey, setDragFieldKey] = useState(null);
+  const [showWorkbenchPanel, setShowWorkbenchPanel] = useState(showWorkbench);
+  const [showUnscheduledPanel, setShowUnscheduledPanel] = useState(true);
+  const [unscheduledSortKey, setUnscheduledSortKey] = useState("sceneNumber");
+  const [unscheduledSortDir, setUnscheduledSortDir] = useState("asc");
   const [editorTarget, setEditorTarget] = useState(null);
   const [draft, setDraft] = useState(toDraft(null, UNSCHEDULED_DAY));
   const [entityType, setEntityType] = useState("cast");
   const [selectedEntity, setSelectedEntity] = useState("");
   const [chipInputs, setChipInputs] = useState({ cast: "", props: "", wardrobe: "", sets: "", location: "" });
+  const resizeRef = useRef(null);
 
   const stripCount = useMemo(() => Object.values(stripsByDay).reduce((count, dayStrips) => count + dayStrips.length, 0), [stripsByDay]);
   const shootingDays = useMemo(() => days.filter((day) => day !== UNSCHEDULED_DAY), [days]);
+
+  useEffect(() => {
+    const normalized = normalizeLayoutConfig(layoutConfig);
+    setColorMode(normalized.colorMode);
+    setRowHeight(normalized.rowHeight);
+    setFieldOrder(normalized.fieldOrder);
+    setColumnWidths(normalized.columnWidths);
+  }, [layoutConfig]);
+
+  useEffect(() => {
+    setShowWorkbenchPanel(showWorkbench);
+  }, [showWorkbench]);
 
   const allSceneRefs = useMemo(() => {
     const refs = [];
@@ -170,7 +282,11 @@ export function Stripboard({ days, setDays, stripsByDay, setStripsByDay, showEle
     return maps;
   }, [allSceneRefs]);
 
-  const entityList = useMemo(() => Array.from(entityIndex[entityType].entries()).map(([value, refs]) => ({ value, count: refs.length })).sort((a, b) => b.count - a.count || a.value.localeCompare(b.value)), [entityIndex, entityType]);
+  const entityList = useMemo(
+    () => Array.from(entityIndex[entityType].entries()).map(([value, refs]) => ({ value, count: refs.length })).sort((a, b) => b.count - a.count || a.value.localeCompare(b.value)),
+    [entityIndex, entityType]
+  );
+
   const currentEntityScenes = useMemo(() => {
     if (!selectedEntity) return [];
     const out = [];
@@ -195,66 +311,119 @@ export function Stripboard({ days, setDays, stripsByDay, setStripsByDay, showEle
     if (!entityList.some((item) => item.value === selectedEntity)) setSelectedEntity(entityList[0].value);
   }, [entityList, selectedEntity]);
 
-  function onDrop(targetDay) {
-    if (!dragged) return;
-    setStripsByDay((prev) => {
-      const next = Object.fromEntries(Object.entries(prev).map(([day, strips]) => [day, [...strips]]));
-      const source = (next[dragged.day] ?? []).find((strip) => strip.id === dragged.id);
-      if (!source) return prev;
-      next[dragged.day] = (next[dragged.day] ?? []).filter((strip) => strip.id !== dragged.id);
-      next[targetDay] = [...(next[targetDay] ?? []), source];
-      return next;
-    });
-    if (editorTarget?.id === dragged.id) {
-      setEditorTarget({ id: dragged.id, day: targetDay });
-      setDraft((prev) => ({ ...prev, sourceDay: targetDay, day: targetDay }));
+  function uniqueDayName(dayList) {
+    let index = dayList.filter((day) => day !== UNSCHEDULED_DAY).length + 1;
+    let candidate = `Day ${index}`;
+    while (dayList.includes(candidate)) {
+      index += 1;
+      candidate = `Day ${index}`;
     }
-    setDragged(null);
+    return candidate;
   }
 
-  function toggleSelect(stripId) {
-    setSelectedStripIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(stripId)) next.delete(stripId); else next.add(stripId);
-      return next;
-    });
-  }
+  function insertDayBreakAfterActive() {
+    const selectedId = editorTarget?.id;
+    if (!selectedId) return;
 
-  function bulkMove(targetDay) {
-    if (!selectedStripIds.size) return;
+    let sourceDay = null;
+    let sourceIndex = -1;
+    for (const day of days) {
+      const idx = (stripsByDay[day] ?? []).findIndex((strip) => strip.id === selectedId);
+      if (idx >= 0) {
+        sourceDay = day;
+        sourceIndex = idx;
+        break;
+      }
+    }
+    if (!sourceDay || sourceIndex < 0) return;
+
+    const sourceStrips = stripsByDay[sourceDay] ?? [];
+    if (sourceIndex >= sourceStrips.length - 1) return;
+
+    const nextDayName = uniqueDayName(days);
+    const sourceDayPosition = days.indexOf(sourceDay);
+    const nextDays = [...days];
+    nextDays.splice(sourceDayPosition + 1, 0, nextDayName);
+    setDays(nextDays);
+
     setStripsByDay((prev) => {
       const next = Object.fromEntries(Object.entries(prev).map(([day, strips]) => [day, [...strips]]));
-      const moving = [];
-      for (const day of days) {
-        next[day] = (next[day] ?? []).filter((strip) => {
-          if (selectedStripIds.has(strip.id)) {
-            moving.push(strip);
-            return false;
-          }
-          return true;
-        });
-      }
-      next[targetDay] = [...(next[targetDay] ?? []), ...moving];
+      const current = next[sourceDay] ?? [];
+      next[sourceDay] = current.slice(0, sourceIndex + 1);
+      next[nextDayName] = current.slice(sourceIndex + 1);
       return next;
     });
-    setSelectedStripIds(new Set());
   }
 
-  function addDay() {
-    const nextDayName = `Day ${shootingDays.length + 1}`;
-    setDays((prev) => {
-      if (prev.includes(nextDayName)) return prev;
-      return [UNSCHEDULED_DAY, ...prev.filter((day) => day !== UNSCHEDULED_DAY), nextDayName];
-    });
+  function moveStrip(stripId, targetDay, beforeStripId = null) {
+    if (!stripId || !targetDay) return;
     setStripsByDay((prev) => {
-      if (Object.prototype.hasOwnProperty.call(prev, nextDayName)) return prev;
-      return { ...prev, [nextDayName]: [] };
+      const next = Object.fromEntries(Object.entries(prev).map(([day, strips]) => [day, [...strips]]));
+      let moving = null;
+      for (const day of Object.keys(next)) {
+        const idx = next[day].findIndex((strip) => strip.id === stripId);
+        if (idx >= 0) {
+          moving = next[day][idx];
+          next[day].splice(idx, 1);
+          break;
+        }
+      }
+      if (!moving) return prev;
+      const targetList = next[targetDay] ?? [];
+      if (!beforeStripId) {
+        targetList.push(moving);
+      } else {
+        const targetIndex = targetList.findIndex((strip) => strip.id === beforeStripId);
+        if (targetIndex < 0) targetList.push(moving);
+        else targetList.splice(targetIndex, 0, moving);
+      }
+      next[targetDay] = targetList;
+      return next;
     });
+  }
+
+  function getSortValue(strip, key) {
+    if (key === "cast" || key === "props" || key === "wardrobe" || key === "sets") {
+      return (strip[key] || []).join(", ").toUpperCase();
+    }
+    if (key === "pageEighths" || key === "estTimeMinutes" || key === "sceneNumber") {
+      return Number(strip[key] || 0);
+    }
+    return String(strip[key] || "").toUpperCase();
+  }
+
+  function startFirstShootDayFromUnscheduled() {
+    const unscheduled = stripsByDay[UNSCHEDULED_DAY] ?? [];
+    if (!unscheduled.length) return;
+    const nextDayName = uniqueDayName(days);
+    setDays([UNSCHEDULED_DAY, ...shootingDays, nextDayName]);
+    setStripsByDay((prev) => ({
+      ...prev,
+      [UNSCHEDULED_DAY]: [],
+      [nextDayName]: [...(prev[nextDayName] ?? []), ...unscheduled],
+    }));
   }
 
   function selectStrip(strip, day) {
     setEditorTarget({ id: strip.id, day });
     setDraft(toDraft(strip, day));
+  }
+
+  function applyHeadingToDraft(heading) {
+    setDraft((prev) => {
+      const derived = parseHeadingFields(heading, {
+        intExt: prev.intExt,
+        location: prev.location,
+        timeOfDay: prev.timeOfDay,
+      });
+      return {
+        ...prev,
+        heading,
+        intExt: derived.intExt,
+        location: derived.location,
+        timeOfDay: derived.timeOfDay,
+      };
+    });
   }
 
   function resetForNew() {
@@ -270,6 +439,7 @@ export function Stripboard({ days, setDays, stripsByDay, setStripsByDay, showEle
     const sceneNumber = Number.isNaN(numericSceneNumber) ? stripCount + 1 : numericSceneNumber;
     const parsedPageEighths = parsePageCountToEighths(draft.pageCount);
     const pageEighths = parsedPageEighths ?? estimateVisualPageEighths(draft.scriptText);
+    const estTimeMinutes = Math.max(0, Number.parseInt(String(draft.estTimeMinutes || "0"), 10) || 0);
     return {
       id: draft.id || createStripId("scene"),
       sceneNumber,
@@ -285,6 +455,7 @@ export function Stripboard({ days, setDays, stripsByDay, setStripsByDay, showEle
       intExt: draft.intExt,
       timeOfDay: draft.timeOfDay,
       pageEighths,
+      estTimeMinutes,
     };
   }
 
@@ -338,40 +509,124 @@ export function Stripboard({ days, setDays, stripsByDay, setStripsByDay, showEle
   function setLocation(value) {
     const candidate = String(value || "").trim();
     if (!candidate) return;
-    setDraft((prev) => ({ ...prev, location: candidate }));
+    setDraft((prev) => ({ ...prev, location: candidate.replace(/^[\s.\-:;]+/, "") }));
     setChipInputs((prev) => ({ ...prev, location: "" }));
   }
 
-  function renderStrip(strip, day) {
-    const selected = selectedStripIds.has(strip.id);
-    const stripStyle = getStripStyle(strip, colorMode);
-    return (
-      <article
-        key={strip.id}
-        className={`strip ${selected ? "selected" : ""} ${editorTarget?.id === strip.id ? "editing" : ""}`}
-        draggable
-        style={stripStyle}
-        onDragStart={() => setDragged({ id: strip.id, day })}
-        onClick={() => selectStrip(strip, day)}
-      >
-        <label onClick={(event) => event.stopPropagation()}>
-          <input type="checkbox" checked={selected} onChange={() => toggleSelect(strip.id)} onClick={(event) => event.stopPropagation()} /> Select
-        </label>
-        <h4>Scene {strip.sceneNumber}</h4>
-        <p className="strip-meta">{formatPageEighths(strip.pageEighths)} pgs | {strip.intExt} | {strip.timeOfDay}</p>
-        <p>{strip.heading}</p>
-        <p><strong>Set:</strong> {strip.location}</p>
-        <p><strong>Cast:</strong> {(strip.cast ?? []).length ? strip.cast.join(", ") : "Unresolved"}</p>
-        {strip.needsReview ? <span className="flag">Needs Review</span> : null}
-      </article>
-    );
+  function deleteCastElement() {
+    if (entityType !== "cast" || !selectedEntity) return;
+    const target = selectedEntity.trim().toUpperCase();
+    setStripsByDay((prev) => {
+      const next = Object.fromEntries(Object.entries(prev).map(([day, strips]) => [day, [...strips]]));
+      for (const day of Object.keys(next)) {
+        next[day] = (next[day] || []).map((strip) => ({
+          ...strip,
+          cast: (strip.cast || []).filter((name) => String(name || "").trim().toUpperCase() !== target),
+        }));
+      }
+      return next;
+    });
+    setSelectedEntity("");
   }
+
+  function saveLayout() {
+    onSaveLayoutConfig?.({
+      fieldOrder,
+      rowHeight,
+      colorMode,
+      columnWidths,
+    });
+  }
+
+  function onHeaderClickSort(fieldKey) {
+    if (unscheduledSortKey !== fieldKey) {
+      setUnscheduledSortKey(fieldKey);
+      setUnscheduledSortDir("asc");
+      return;
+    }
+    setUnscheduledSortDir((prevDir) => (prevDir === "asc" ? "desc" : "asc"));
+  }
+
+  function beginResize(fieldKey, event) {
+    event.preventDefault();
+    event.stopPropagation();
+    const startX = event.clientX;
+    const startWidth = Number(columnWidths[fieldKey] || DEFAULT_LAYOUT.columnWidths[fieldKey] || 120);
+    resizeRef.current = { fieldKey, startX, startWidth };
+  }
+
+  useEffect(() => {
+    function onMouseMove(event) {
+      if (!resizeRef.current) return;
+      const { fieldKey, startX, startWidth } = resizeRef.current;
+      const delta = event.clientX - startX;
+      const nextWidth = Math.max(60, Math.min(700, startWidth + delta));
+      setColumnWidths((prev) => ({ ...prev, [fieldKey]: nextWidth }));
+    }
+
+    function onMouseUp() {
+      if (!resizeRef.current) return;
+      resizeRef.current = null;
+      onSaveLayoutConfig?.({
+        fieldOrder,
+        rowHeight,
+        colorMode,
+        columnWidths,
+      });
+    }
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, [colorMode, columnWidths, fieldOrder, onSaveLayoutConfig, rowHeight]);
+
+  function onFieldDrop(targetField) {
+    if (!dragFieldKey || dragFieldKey === targetField) return;
+    setFieldOrder((prev) => {
+      const next = [...prev];
+      const from = next.indexOf(dragFieldKey);
+      const to = next.indexOf(targetField);
+      if (from < 0 || to < 0) return prev;
+      next.splice(from, 1);
+      next.splice(to, 0, dragFieldKey);
+      return next;
+    });
+    setDragFieldKey(null);
+  }
+
+  const stackedDayBlocks = useMemo(() => {
+    return shootingDays.map((day, index) => {
+      const strips = stripsByDay[day] ?? [];
+      return {
+        day,
+        dayIndex: index + 1,
+        strips,
+        pageTotal: getDayTotalEighths(strips),
+        timeTotal: getDayTotalMinutes(strips),
+      };
+    });
+  }, [shootingDays, stripsByDay]);
+
+  const unscheduledRows = useMemo(() => {
+    const rows = [...(stripsByDay[UNSCHEDULED_DAY] ?? [])];
+    rows.sort((a, b) => {
+      const av = getSortValue(a, unscheduledSortKey);
+      const bv = getSortValue(b, unscheduledSortKey);
+      const cmp = typeof av === "number" && typeof bv === "number"
+        ? av - bv
+        : String(av).localeCompare(String(bv));
+      return unscheduledSortDir === "asc" ? cmp : -cmp;
+    });
+    return rows;
+  }, [stripsByDay, unscheduledSortKey, unscheduledSortDir]);
 
   return (
     <div>
       <div className="toolbar">
         <span>Total strips: {stripCount}</span>
-        <span>Selected: {selectedStripIds.size}</span>
         <label className="inline-control">
           Color Mode
           <select value={colorMode} onChange={(event) => setColorMode(event.target.value)}>
@@ -380,15 +635,28 @@ export function Stripboard({ days, setDays, stripsByDay, setStripsByDay, showEle
             <option value="none">None</option>
           </select>
         </label>
-        <button type="button" className="add-day-button" onClick={addDay}>Add Day</button>
-        {days.map((day) => (
-          <button key={day} type="button" onClick={() => bulkMove(day)}>Move Selected to {day}</button>
-        ))}
+        <button type="button" onClick={insertDayBreakAfterActive} disabled={!editorTarget}>Add Day Break After Active Scene</button>
+        <button type="button" onClick={startFirstShootDayFromUnscheduled} disabled={(stripsByDay[UNSCHEDULED_DAY] ?? []).length === 0}>Start Schedule From Unscheduled</button>
+        <button type="button" onClick={() => setShowUnscheduledPanel((prev) => !prev)}>
+          {showUnscheduledPanel ? "Hide Unscheduled" : "Show Unscheduled"}
+        </button>
+        {onReturnToStripView ? <button type="button" onClick={onReturnToStripView}>Return to Strip View</button> : null}
+        {showWorkbench ? (
+          <button type="button" onClick={() => setShowWorkbenchPanel((prev) => !prev)}>
+            {showWorkbenchPanel ? "Hide Scene Workbench" : "Show Scene Workbench"}
+          </button>
+        ) : null}
       </div>
 
       {showWorkbench ? (
         <section className="scene-editor">
-          <h3>Scene Workbench</h3>
+          <div className="workbench-header">
+            <h3>Scene Workbench</h3>
+            <button type="button" onClick={() => setShowWorkbenchPanel((prev) => !prev)}>
+              {showWorkbenchPanel ? "Minimize Scene Workbench" : "Expand Scene Workbench"}
+            </button>
+          </div>
+          {showWorkbenchPanel ? (
           <form onSubmit={(event) => event.preventDefault()}>
             <div className="editor-actions">
               <button type="button" onClick={updateScene} disabled={!editorTarget}>Update</button>
@@ -415,7 +683,7 @@ export function Stripboard({ days, setDays, stripsByDay, setStripsByDay, showEle
               </label>
               <label className="field-heading">
                 Heading
-                <input type="text" value={draft.heading} onChange={(event) => setDraft((prev) => ({ ...prev, heading: event.target.value }))} />
+                <input type="text" value={draft.heading} onChange={(event) => applyHeadingToDraft(event.target.value)} />
               </label>
             </div>
             <div className="editor-row-secondary">
@@ -449,6 +717,10 @@ export function Stripboard({ days, setDays, stripsByDay, setStripsByDay, showEle
                 <input type="text" value={draft.pageCount} placeholder="e.g. 2 3/8" onChange={(event) => setDraft((prev) => ({ ...prev, pageCount: event.target.value }))} />
               </label>
               <label>
+                Est. Time (min)
+                <input type="number" min={0} value={draft.estTimeMinutes} onChange={(event) => setDraft((prev) => ({ ...prev, estTimeMinutes: event.target.value }))} />
+              </label>
+              <label>
                 Scheduled Day
                 <select value={draft.day} onChange={(event) => setDraft((prev) => ({ ...prev, day: event.target.value }))}>
                   {days.map((day) => (<option key={day} value={day}>{day}</option>))}
@@ -475,6 +747,9 @@ export function Stripboard({ days, setDays, stripsByDay, setStripsByDay, showEle
               <input type="checkbox" checked={draft.needsReview} onChange={(event) => setDraft((prev) => ({ ...prev, needsReview: event.target.checked }))} /> Needs Review
             </label>
           </form>
+          ) : (
+            <p className="workbench-collapsed">Workbench minimized.</p>
+          )}
         </section>
       ) : null}
 
@@ -492,6 +767,9 @@ export function Stripboard({ days, setDays, stripsByDay, setStripsByDay, showEle
                 <option value="sets">Sets</option>
               </select>
             </label>
+            {entityType === "cast" ? (
+              <button type="button" onClick={deleteCastElement} disabled={!selectedEntity}>Delete Cast</button>
+            ) : null}
           </div>
           <div className="entity-layout">
             <div className="entity-list">
@@ -510,27 +788,167 @@ export function Stripboard({ days, setDays, stripsByDay, setStripsByDay, showEle
               ))}
             </div>
           </div>
+          <div className="layout-builder">
+            <h4>Strip Layout Builder</h4>
+            <p>Drag fields to reorder strip columns. Adjust height and color scheme, then save.</p>
+            <div className="layout-pill-row">
+              {fieldOrder.map((fieldKey) => (
+                <button
+                  key={fieldKey}
+                  type="button"
+                  className="layout-pill"
+                  draggable
+                  onDragStart={() => setDragFieldKey(fieldKey)}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={() => onFieldDrop(fieldKey)}
+                >
+                  {FIELD_DEFS[fieldKey]?.label || fieldKey}
+                </button>
+              ))}
+            </div>
+            <div className="layout-controls">
+              <label>
+                Row Height
+                <input type="range" min={22} max={84} value={rowHeight} onChange={(event) => setRowHeight(Number(event.target.value))} />
+              </label>
+              <label>
+                Color Scheme
+                <select value={colorMode} onChange={(event) => setColorMode(event.target.value)}>
+                  <option value="dayNight">Day/Night</option>
+                  <option value="intExt">INT/EXT</option>
+                  <option value="none">None</option>
+                </select>
+              </label>
+              <button type="button" onClick={saveLayout}>Save Layout to Schedule</button>
+            </div>
+          </div>
         </section>
       ) : null}
 
       {reportView === "stripboard" ? (
         <div className="stripboard-layout">
-          <div className="board-shell">
-            <section className="column unscheduled-column" onDragOver={(event) => event.preventDefault()} onDrop={() => onDrop(UNSCHEDULED_DAY)}>
-              <h3>{UNSCHEDULED_DAY} <span className="day-total">{formatPageEighths(getDayTotalEighths(stripsByDay[UNSCHEDULED_DAY] ?? []))} pages</span></h3>
-              {(stripsByDay[UNSCHEDULED_DAY] ?? []).map((strip) => renderStrip(strip, UNSCHEDULED_DAY))}
+          <div className={showUnscheduledPanel ? "strip-split-layout" : "strip-split-layout unscheduled-hidden"}>
+            {showUnscheduledPanel ? (
+              <section className="scene-table-wrap unscheduled-pane">
+                <table className="scene-table">
+                  <thead>
+                    <tr>
+                      {fieldOrder.map((fieldKey) => (
+                        <th
+                          key={`uns-h-${fieldKey}`}
+                          className={unscheduledSortKey === fieldKey ? "sortable-header is-active" : "sortable-header"}
+                          style={{ width: `${columnWidths[fieldKey] || DEFAULT_LAYOUT.columnWidths[fieldKey] || 120}px` }}
+                          onClick={() => onHeaderClickSort(fieldKey)}
+                        >
+                          <span>{FIELD_DEFS[fieldKey]?.label || fieldKey}</span>
+                          {unscheduledSortKey === fieldKey ? <span>{unscheduledSortDir === "asc" ? "▲" : "▼"}</span> : null}
+                          <span className="col-resize-handle" onMouseDown={(event) => beginResize(fieldKey, event)} />
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr
+                      className="day-break-row"
+                      onDragOver={(event) => event.preventDefault()}
+                      onDrop={() => {
+                        if (!draggedStrip) return;
+                        moveStrip(draggedStrip.id, UNSCHEDULED_DAY, null);
+                        setDraggedStrip(null);
+                      }}
+                    >
+                      <td colSpan={fieldOrder.length}>Unscheduled ({unscheduledRows.length})</td>
+                    </tr>
+                    {unscheduledRows.map((strip) => {
+                      const isActive = editorTarget?.id === strip.id;
+                      return (
+                        <tr
+                          key={strip.id}
+                          className={isActive ? "scene-row selected" : "scene-row"}
+                          style={{ ...getStripStyle(strip, colorMode), height: `${rowHeight}px` }}
+                          onClick={() => selectStrip(strip, UNSCHEDULED_DAY)}
+                          draggable
+                          onDragStart={() => setDraggedStrip({ id: strip.id, day: UNSCHEDULED_DAY })}
+                          onDragEnd={() => setDraggedStrip(null)}
+                          onDragOver={(event) => event.preventDefault()}
+                          onDrop={() => {
+                            if (!draggedStrip) return;
+                            moveStrip(draggedStrip.id, UNSCHEDULED_DAY, strip.id);
+                            setDraggedStrip(null);
+                          }}
+                        >
+                          {fieldOrder.map((fieldKey) => (
+                            <td key={`uns-${strip.id}-${fieldKey}`} style={{ width: `${columnWidths[fieldKey] || DEFAULT_LAYOUT.columnWidths[fieldKey] || 120}px` }}>
+                              {FIELD_DEFS[fieldKey]?.value(strip) || ""}
+                            </td>
+                          ))}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </section>
+            ) : null}
+
+            <section className="scene-table-wrap scheduled-pane">
+              <table className="scene-table">
+                <thead>
+                  <tr>
+                    {fieldOrder.map((fieldKey) => (
+                      <th key={`sched-h-${fieldKey}`} style={{ width: `${columnWidths[fieldKey] || DEFAULT_LAYOUT.columnWidths[fieldKey] || 120}px` }}>
+                        {FIELD_DEFS[fieldKey]?.label || fieldKey}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {stackedDayBlocks.map((block) => (
+                    <Fragment key={`day-group-${block.day}`}>
+                      {block.strips.map((strip) => {
+                        const isActive = editorTarget?.id === strip.id;
+                        return (
+                          <tr
+                            key={strip.id}
+                            className={isActive ? "scene-row selected" : "scene-row"}
+                            style={{ ...getStripStyle(strip, colorMode), height: `${rowHeight}px` }}
+                            onClick={() => selectStrip(strip, block.day)}
+                            draggable
+                            onDragStart={() => setDraggedStrip({ id: strip.id, day: block.day })}
+                            onDragEnd={() => setDraggedStrip(null)}
+                            onDragOver={(event) => event.preventDefault()}
+                            onDrop={() => {
+                              if (!draggedStrip) return;
+                              moveStrip(draggedStrip.id, block.day, strip.id);
+                              setDraggedStrip(null);
+                            }}
+                          >
+                            {fieldOrder.map((fieldKey) => (
+                              <td key={`sched-${strip.id}-${fieldKey}`} style={{ width: `${columnWidths[fieldKey] || DEFAULT_LAYOUT.columnWidths[fieldKey] || 120}px` }}>
+                                {FIELD_DEFS[fieldKey]?.value(strip) || ""}
+                              </td>
+                            ))}
+                          </tr>
+                        );
+                      })}
+                      <tr
+                        key={`break-${block.day}`}
+                        className="day-break-row"
+                        onDragOver={(event) => event.preventDefault()}
+                        onDrop={() => {
+                          if (!draggedStrip) return;
+                          moveStrip(draggedStrip.id, block.day, null);
+                          setDraggedStrip(null);
+                        }}
+                      >
+                        <td colSpan={fieldOrder.length}>
+                          End of Day #{block.dayIndex} - {block.day} - {formatPageEighths(block.pageTotal)} pages - {formatMinutes(block.timeTotal)} est.
+                        </td>
+                      </tr>
+                    </Fragment>
+                  ))}
+                </tbody>
+              </table>
             </section>
-            <div className="shooting-days-stack">
-              {shootingDays.map((day) => {
-                const dayStrips = stripsByDay[day] ?? [];
-                return (
-                  <section key={day} className="column shooting-day-column" onDragOver={(event) => event.preventDefault()} onDrop={() => onDrop(day)}>
-                    <h3>{day} <span className="day-total">{formatPageEighths(getDayTotalEighths(dayStrips))} pages</span></h3>
-                    {dayStrips.map((strip) => renderStrip(strip, day))}
-                  </section>
-                );
-              })}
-            </div>
           </div>
         </div>
       ) : null}

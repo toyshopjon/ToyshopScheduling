@@ -64,7 +64,7 @@ function inferLocationFromHeading(heading, fallback = "") {
     }
   }
 
-  return parts.join(" - ").trim() || fallback;
+  return parts.join(" - ").replace(/^[\s.\-:;]+/, "").trim() || fallback;
 }
 
 function deriveHeadingFromSelectedText(selectedText, fallbackHeading) {
@@ -139,14 +139,24 @@ function ChipListEditor({ title, values, onAdd, onRemove, suggestions = [], inpu
   );
 }
 
-export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeedback }) {
+export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeedback, onSaveAlias }) {
   const [scenes, setScenes] = useState(() => parsedScenes.map((scene, index) => asReviewScene(scene, index)));
   const [index, setIndex] = useState(0);
   const [splitError, setSplitError] = useState("");
+  const [aliasForm, setAliasForm] = useState({ elementType: "cast", alias: "", canonical: "" });
+  const [aliasStatus, setAliasStatus] = useState("");
   const [inputs, setInputs] = useState({ cast: "", location: "", props: "", wardrobe: "", sets: "" });
   const scriptTextRef = useRef(null);
 
   const current = scenes[index];
+
+  function renumberFromIndex(nextScenes, startIndex, startNumber) {
+    const safeStart = Math.max(0, Number.parseInt(String(startNumber), 10) || 1);
+    return nextScenes.map((scene, sceneIndex) => {
+      if (sceneIndex < startIndex) return scene;
+      return { ...scene, scene_number: safeStart + (sceneIndex - startIndex) };
+    });
+  }
 
   const knownElements = useMemo(() => {
     const cast = new Set();
@@ -181,12 +191,40 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
     );
   }
 
+  const castPredictedOnly = useMemo(() => {
+    const predicted = new Set((current.predicted.cast || []).map((item) => item.toUpperCase()));
+    const corrected = new Set((current.corrected.cast || []).map((item) => item.toUpperCase()));
+    return (current.predicted.cast || []).filter((item) => !corrected.has(item.toUpperCase()));
+  }, [current.corrected.cast, current.predicted.cast]);
+
+  const castMissed = useMemo(() => {
+    const predicted = new Set((current.predicted.cast || []).map((item) => item.toUpperCase()));
+    return (current.corrected.cast || []).filter((item) => !predicted.has(item.toUpperCase()));
+  }, [current.corrected.cast, current.predicted.cast]);
+
+  const locationMismatch = useMemo(() => {
+    const predicted = String(current.predicted.location || "").trim();
+    const corrected = String(current.corrected.location || "").trim();
+    if (!predicted && !corrected) return false;
+    return predicted.toUpperCase() !== corrected.toUpperCase();
+  }, [current.corrected.location, current.predicted.location]);
+
   function updateCurrent(updater) {
     setScenes((prev) => {
       const next = [...prev];
       const currentScene = next[index];
       next[index] = updater(currentScene);
       return next;
+    });
+  }
+
+  function updateCurrentSceneNumber(value) {
+    const parsed = Number.parseInt(String(value), 10);
+    if (!Number.isFinite(parsed) || parsed < 1) return;
+    setScenes((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], scene_number: parsed };
+      return renumberFromIndex(next, index, parsed);
     });
   }
 
@@ -220,7 +258,7 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
       ...scene,
       corrected: {
         ...scene.corrected,
-        location: candidate,
+        location: candidate.replace(/^[\s.\-:;]+/, ""),
       },
     }));
     setInputs((prev) => ({ ...prev, location: "" }));
@@ -291,10 +329,24 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
       };
       next[index] = updatedCurrent;
       next.splice(index + 1, 0, splitScene);
-      return next.map((scene, sceneIndex) => ({ ...scene, source_order: sceneIndex }));
+      const renumbered = renumberFromIndex(next, index, Number(next[index].scene_number) || 1);
+      return renumbered.map((scene, sceneIndex) => ({ ...scene, source_order: sceneIndex }));
     });
 
     setSplitError("");
+  }
+
+  function applyHeadingUpdate(heading) {
+    updateCurrent((scene) => ({
+      ...scene,
+      heading,
+      int_ext: inferIntExtFromHeading(heading, scene.int_ext || "INT"),
+      time_of_day: inferTimeFromHeading(heading, scene.time_of_day || "DAY"),
+      corrected: {
+        ...scene.corrected,
+        location: inferLocationFromHeading(heading, scene.corrected.location || scene.location || ""),
+      },
+    }));
   }
 
   async function saveFeedbackFor(scene) {
@@ -372,6 +424,27 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
     );
   }
 
+  async function saveAliasCorrection() {
+    const alias = aliasForm.alias.trim();
+    const canonical = aliasForm.canonical.trim();
+    if (!alias || !canonical) {
+      setAliasStatus("Enter both Alias and Canonical values.");
+      return;
+    }
+    try {
+      await onSaveAlias?.({
+        element_type: aliasForm.elementType,
+        alias,
+        canonical,
+        source: "manual",
+      });
+      setAliasStatus(`Saved correction: ${alias.toUpperCase()} -> ${canonical}`);
+      setAliasForm((prev) => ({ ...prev, alias: "" }));
+    } catch {
+      setAliasStatus("Failed to save correction.");
+    }
+  }
+
   return (
     <section className="panel">
       <h3>Scene Review Mode</h3>
@@ -392,9 +465,10 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
         <label className="field-scene-number">
           Scene Number
           <input
-            type="text"
+            type="number"
+            min={1}
             value={String(current.scene_number ?? "")}
-            onChange={(event) => updateCurrent((scene) => ({ ...scene, scene_number: event.target.value }))}
+            onChange={(event) => updateCurrentSceneNumber(event.target.value)}
           />
         </label>
         <label className="field-int-ext">
@@ -424,7 +498,7 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
           <input
             type="text"
             value={current.heading || ""}
-            onChange={(event) => updateCurrent((scene) => ({ ...scene, heading: event.target.value }))}
+            onChange={(event) => applyHeadingUpdate(event.target.value)}
           />
         </label>
       </div>
@@ -518,6 +592,47 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
       <div className="review-hint">
         <p><strong>Predicted cast:</strong> {toCsv(current.predicted.cast) || "None"}</p>
         <p>Select text in the script below, then click <strong>Create Scene From Selection</strong> to split a missed scene.</p>
+      </div>
+
+      <div className="review-mistakes">
+        <p><strong>Likely wrong (predicted only):</strong> {castPredictedOnly.join(", ") || "None"}</p>
+        <p><strong>Likely missed (in corrected, not predicted):</strong> {castMissed.join(", ") || "None"}</p>
+        <p><strong>Location mismatch:</strong> {locationMismatch ? `${current.predicted.location || "None"} -> ${current.corrected.location || "None"}` : "No"}</p>
+      </div>
+
+      <div className="review-correction">
+        <h4>Manual Training Correction</h4>
+        <p>Use this when parser output is clearly wrong. Example: `JON` -> `JON SMITH`.</p>
+        <div className="review-correction-row">
+          <label>
+            Element
+            <select value={aliasForm.elementType} onChange={(event) => setAliasForm((prev) => ({ ...prev, elementType: event.target.value }))}>
+              <option value="cast">Cast</option>
+              <option value="location">Location</option>
+              <option value="props">Props</option>
+              <option value="wardrobe">Wardrobe</option>
+              <option value="sets">Sets</option>
+            </select>
+          </label>
+          <label>
+            Alias (wrong output)
+            <input
+              type="text"
+              value={aliasForm.alias}
+              onChange={(event) => setAliasForm((prev) => ({ ...prev, alias: event.target.value }))}
+            />
+          </label>
+          <label>
+            Canonical (correct value)
+            <input
+              type="text"
+              value={aliasForm.canonical}
+              onChange={(event) => setAliasForm((prev) => ({ ...prev, canonical: event.target.value }))}
+            />
+          </label>
+          <button type="button" onClick={saveAliasCorrection}>Save Correction</button>
+        </div>
+        {aliasStatus ? <p>{aliasStatus}</p> : null}
       </div>
 
       <textarea

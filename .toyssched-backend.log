@@ -1,8 +1,340 @@
 INFO:     Will watch for changes in these directories: ['/Users/joncampbell/Documents/New project/backend']
-INFO:     Uvicorn running on http://127.0.0.1:8002 (Press CTRL+C to quit)
-INFO:     Started reloader process [34752] using WatchFiles
-INFO:     Started server process [34758]
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [39593] using WatchFiles
+INFO:     Started server process [39599]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
-INFO:     127.0.0.1:51371 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51377 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53711 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53754 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54490 - "POST /scripts/parse-jobs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54490 - "GET /scripts/parse-jobs/659536a32e37426eb25ba3d5ac0ded0f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54490 - "GET /scripts/parse-jobs/659536a32e37426eb25ba3d5ac0ded0f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54490 - "GET /scripts/parse-jobs/659536a32e37426eb25ba3d5ac0ded0f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54490 - "GET /scripts/parse-jobs/659536a32e37426eb25ba3d5ac0ded0f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54490 - "GET /scripts/parse-jobs/659536a32e37426eb25ba3d5ac0ded0f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54490 - "GET /scripts/parse-jobs/659536a32e37426eb25ba3d5ac0ded0f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54490 - "GET /scripts/parse-jobs/659536a32e37426eb25ba3d5ac0ded0f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54490 - "GET /scripts/parse-jobs/659536a32e37426eb25ba3d5ac0ded0f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54490 - "GET /scripts/parse-jobs/659536a32e37426eb25ba3d5ac0ded0f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54490 - "GET /scripts/parse-jobs/659536a32e37426eb25ba3d5ac0ded0f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54490 - "GET /scripts/parse-jobs/659536a32e37426eb25ba3d5ac0ded0f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54490 - "GET /scripts/parse-jobs/659536a32e37426eb25ba3d5ac0ded0f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54490 - "GET /scripts/parse-jobs/659536a32e37426eb25ba3d5ac0ded0f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54490 - "GET /scripts/parse-jobs/659536a32e37426eb25ba3d5ac0ded0f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54490 - "GET /scripts/parse-jobs/659536a32e37426eb25ba3d5ac0ded0f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54490 - "GET /scripts/parse-jobs/659536a32e37426eb25ba3d5ac0ded0f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54490 - "GET /scripts/parse-jobs/659536a32e37426eb25ba3d5ac0ded0f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54490 - "GET /scripts/parse-jobs/659536a32e37426eb25ba3d5ac0ded0f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54490 - "GET /scripts/parse-jobs/659536a32e37426eb25ba3d5ac0ded0f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54490 - "GET /scripts/parse-jobs/659536a32e37426eb25ba3d5ac0ded0f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54490 - "GET /scripts/parse-jobs/659536a32e37426eb25ba3d5ac0ded0f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54490 - "GET /scripts/parse-jobs/659536a32e37426eb25ba3d5ac0ded0f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54490 - "GET /scripts/parse-jobs/659536a32e37426eb25ba3d5ac0ded0f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54490 - "GET /scripts/parse-jobs/659536a32e37426eb25ba3d5ac0ded0f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54490 - "GET /scripts/parse-jobs/659536a32e37426eb25ba3d5ac0ded0f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54490 - "GET /scripts/parse-jobs/659536a32e37426eb25ba3d5ac0ded0f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54490 - "GET /scripts/parse-jobs/659536a32e37426eb25ba3d5ac0ded0f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54490 - "GET /scripts/parse-jobs/659536a32e37426eb25ba3d5ac0ded0f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54490 - "GET /scripts/parse-jobs/659536a32e37426eb25ba3d5ac0ded0f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54490 - "GET /scripts/parse-jobs/659536a32e37426eb25ba3d5ac0ded0f HTTP/1.1" 200 OK
+WARNING:  WatchFiles detected changes in 'app/services/parser.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [39599]
+INFO:     Started server process [39938]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'tests/test_parser.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [39938]
+INFO:     Started server process [39970]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     127.0.0.1:54932 - "POST /scripts/parse-jobs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54932 - "GET /scripts/parse-jobs/d45d77967eba4552af3441dc2f3ff5ff HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54932 - "GET /scripts/parse-jobs/d45d77967eba4552af3441dc2f3ff5ff HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54932 - "GET /scripts/parse-jobs/d45d77967eba4552af3441dc2f3ff5ff HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54932 - "GET /scripts/parse-jobs/d45d77967eba4552af3441dc2f3ff5ff HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54932 - "GET /scripts/parse-jobs/d45d77967eba4552af3441dc2f3ff5ff HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54932 - "GET /scripts/parse-jobs/d45d77967eba4552af3441dc2f3ff5ff HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54932 - "GET /scripts/parse-jobs/d45d77967eba4552af3441dc2f3ff5ff HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54932 - "GET /scripts/parse-jobs/d45d77967eba4552af3441dc2f3ff5ff HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54932 - "GET /scripts/parse-jobs/d45d77967eba4552af3441dc2f3ff5ff HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54932 - "GET /scripts/parse-jobs/d45d77967eba4552af3441dc2f3ff5ff HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54932 - "GET /scripts/parse-jobs/d45d77967eba4552af3441dc2f3ff5ff HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54932 - "GET /scripts/parse-jobs/d45d77967eba4552af3441dc2f3ff5ff HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54932 - "GET /scripts/parse-jobs/d45d77967eba4552af3441dc2f3ff5ff HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54932 - "GET /scripts/parse-jobs/d45d77967eba4552af3441dc2f3ff5ff HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54932 - "GET /scripts/parse-jobs/d45d77967eba4552af3441dc2f3ff5ff HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54932 - "GET /scripts/parse-jobs/d45d77967eba4552af3441dc2f3ff5ff HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54932 - "GET /scripts/parse-jobs/d45d77967eba4552af3441dc2f3ff5ff HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54932 - "GET /scripts/parse-jobs/d45d77967eba4552af3441dc2f3ff5ff HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54932 - "GET /scripts/parse-jobs/d45d77967eba4552af3441dc2f3ff5ff HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54932 - "GET /scripts/parse-jobs/d45d77967eba4552af3441dc2f3ff5ff HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54932 - "GET /scripts/parse-jobs/d45d77967eba4552af3441dc2f3ff5ff HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54932 - "GET /scripts/parse-jobs/d45d77967eba4552af3441dc2f3ff5ff HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54932 - "GET /scripts/parse-jobs/d45d77967eba4552af3441dc2f3ff5ff HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54932 - "GET /scripts/parse-jobs/d45d77967eba4552af3441dc2f3ff5ff HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54932 - "GET /scripts/parse-jobs/d45d77967eba4552af3441dc2f3ff5ff HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54932 - "GET /scripts/parse-jobs/d45d77967eba4552af3441dc2f3ff5ff HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54932 - "GET /scripts/parse-jobs/d45d77967eba4552af3441dc2f3ff5ff HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55173 - "OPTIONS /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55173 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55175 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55312 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+WARNING:  WatchFiles detected changes in 'app/services/parser.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [39970]
+INFO:     Started server process [40289]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'tests/test_parser.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [40289]
+INFO:     Started server process [40322]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     127.0.0.1:55785 - "POST /scripts/parse-jobs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55785 - "GET /scripts/parse-jobs/72b404375fd04e66bbad302e56e9006a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55785 - "GET /scripts/parse-jobs/72b404375fd04e66bbad302e56e9006a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55785 - "GET /scripts/parse-jobs/72b404375fd04e66bbad302e56e9006a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55785 - "GET /scripts/parse-jobs/72b404375fd04e66bbad302e56e9006a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55785 - "GET /scripts/parse-jobs/72b404375fd04e66bbad302e56e9006a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55785 - "GET /scripts/parse-jobs/72b404375fd04e66bbad302e56e9006a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55785 - "GET /scripts/parse-jobs/72b404375fd04e66bbad302e56e9006a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55785 - "GET /scripts/parse-jobs/72b404375fd04e66bbad302e56e9006a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55785 - "GET /scripts/parse-jobs/72b404375fd04e66bbad302e56e9006a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55785 - "GET /scripts/parse-jobs/72b404375fd04e66bbad302e56e9006a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55785 - "GET /scripts/parse-jobs/72b404375fd04e66bbad302e56e9006a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55785 - "GET /scripts/parse-jobs/72b404375fd04e66bbad302e56e9006a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55785 - "GET /scripts/parse-jobs/72b404375fd04e66bbad302e56e9006a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55785 - "GET /scripts/parse-jobs/72b404375fd04e66bbad302e56e9006a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55785 - "GET /scripts/parse-jobs/72b404375fd04e66bbad302e56e9006a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55785 - "GET /scripts/parse-jobs/72b404375fd04e66bbad302e56e9006a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55785 - "GET /scripts/parse-jobs/72b404375fd04e66bbad302e56e9006a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55785 - "GET /scripts/parse-jobs/72b404375fd04e66bbad302e56e9006a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55785 - "GET /scripts/parse-jobs/72b404375fd04e66bbad302e56e9006a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55785 - "GET /scripts/parse-jobs/72b404375fd04e66bbad302e56e9006a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55785 - "GET /scripts/parse-jobs/72b404375fd04e66bbad302e56e9006a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55785 - "GET /scripts/parse-jobs/72b404375fd04e66bbad302e56e9006a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55785 - "GET /scripts/parse-jobs/72b404375fd04e66bbad302e56e9006a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55785 - "GET /scripts/parse-jobs/72b404375fd04e66bbad302e56e9006a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55785 - "GET /scripts/parse-jobs/72b404375fd04e66bbad302e56e9006a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56161 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56161 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56161 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56161 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56161 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56268 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56268 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56353 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56397 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56535 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56701 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56777 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56777 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56882 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56943 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57028 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57028 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57108 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57160 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57160 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57220 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57292 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57292 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57384 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57452 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57452 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57627 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57707 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57772 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57772 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57901 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57901 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57976 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58020 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58020 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58084 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58136 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58392 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58456 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58456 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58564 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58605 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58642 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58731 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58820 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58873 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58873 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58920 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58920 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58920 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59013 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59144 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59228 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59276 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59335 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59387 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60101 - "OPTIONS /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60101 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+WARNING:  WatchFiles detected changes in 'app/services/parser.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [40322]
+INFO:     Started server process [41512]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'tests/test_parser.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [41512]
+INFO:     Started server process [41663]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'app/routes.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [41663]
+INFO:     Started server process [43190]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'app/services/test_data_store.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [43190]
+INFO:     Started server process [43222]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     127.0.0.1:64743 - "POST /scripts/parse-jobs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64743 - "GET /scripts/parse-jobs/bd37fba9aaa545989eb1f9b3ce8a873b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64743 - "GET /scripts/parse-jobs/bd37fba9aaa545989eb1f9b3ce8a873b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64743 - "GET /scripts/parse-jobs/bd37fba9aaa545989eb1f9b3ce8a873b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64743 - "GET /scripts/parse-jobs/bd37fba9aaa545989eb1f9b3ce8a873b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64743 - "GET /scripts/parse-jobs/bd37fba9aaa545989eb1f9b3ce8a873b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64743 - "GET /scripts/parse-jobs/bd37fba9aaa545989eb1f9b3ce8a873b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64743 - "GET /scripts/parse-jobs/bd37fba9aaa545989eb1f9b3ce8a873b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64743 - "GET /scripts/parse-jobs/bd37fba9aaa545989eb1f9b3ce8a873b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64743 - "GET /scripts/parse-jobs/bd37fba9aaa545989eb1f9b3ce8a873b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64743 - "GET /scripts/parse-jobs/bd37fba9aaa545989eb1f9b3ce8a873b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64743 - "GET /scripts/parse-jobs/bd37fba9aaa545989eb1f9b3ce8a873b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64743 - "GET /scripts/parse-jobs/bd37fba9aaa545989eb1f9b3ce8a873b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64743 - "GET /scripts/parse-jobs/bd37fba9aaa545989eb1f9b3ce8a873b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64743 - "GET /scripts/parse-jobs/bd37fba9aaa545989eb1f9b3ce8a873b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64743 - "GET /scripts/parse-jobs/bd37fba9aaa545989eb1f9b3ce8a873b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64743 - "GET /scripts/parse-jobs/bd37fba9aaa545989eb1f9b3ce8a873b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64743 - "GET /scripts/parse-jobs/bd37fba9aaa545989eb1f9b3ce8a873b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64743 - "GET /scripts/parse-jobs/bd37fba9aaa545989eb1f9b3ce8a873b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64743 - "GET /scripts/parse-jobs/bd37fba9aaa545989eb1f9b3ce8a873b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64743 - "GET /scripts/parse-jobs/bd37fba9aaa545989eb1f9b3ce8a873b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64743 - "GET /scripts/parse-jobs/bd37fba9aaa545989eb1f9b3ce8a873b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64743 - "GET /scripts/parse-jobs/bd37fba9aaa545989eb1f9b3ce8a873b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64743 - "GET /scripts/parse-jobs/bd37fba9aaa545989eb1f9b3ce8a873b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64743 - "GET /scripts/parse-jobs/bd37fba9aaa545989eb1f9b3ce8a873b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64743 - "GET /scripts/parse-jobs/bd37fba9aaa545989eb1f9b3ce8a873b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64941 - "OPTIONS /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64941 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64941 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64941 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64941 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+WARNING:  WatchFiles detected changes in 'app/services/parser.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [43222]
+INFO:     Started server process [46572]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'app/services/parse_jobs.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [46572]
+INFO:     Started server process [46604]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'app/services/test_data_store.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [46604]
+INFO:     Started server process [46687]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'app/routes.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [46687]
+INFO:     Started server process [46744]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'app/services/test_data_store.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [46744]
+INFO:     Started server process [46829]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     127.0.0.1:49937 - "POST /scripts/parse-jobs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49937 - "GET /scripts/parse-jobs/42fae5f1097746d0932253341809dba8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49937 - "GET /scripts/parse-jobs/42fae5f1097746d0932253341809dba8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49937 - "GET /scripts/parse-jobs/42fae5f1097746d0932253341809dba8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49937 - "GET /scripts/parse-jobs/42fae5f1097746d0932253341809dba8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49937 - "GET /scripts/parse-jobs/42fae5f1097746d0932253341809dba8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49937 - "GET /scripts/parse-jobs/42fae5f1097746d0932253341809dba8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49937 - "GET /scripts/parse-jobs/42fae5f1097746d0932253341809dba8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49937 - "GET /scripts/parse-jobs/42fae5f1097746d0932253341809dba8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49937 - "GET /scripts/parse-jobs/42fae5f1097746d0932253341809dba8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49937 - "GET /scripts/parse-jobs/42fae5f1097746d0932253341809dba8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49937 - "GET /scripts/parse-jobs/42fae5f1097746d0932253341809dba8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49937 - "GET /scripts/parse-jobs/42fae5f1097746d0932253341809dba8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49937 - "GET /scripts/parse-jobs/42fae5f1097746d0932253341809dba8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49937 - "GET /scripts/parse-jobs/42fae5f1097746d0932253341809dba8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49937 - "GET /scripts/parse-jobs/42fae5f1097746d0932253341809dba8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49937 - "GET /scripts/parse-jobs/42fae5f1097746d0932253341809dba8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49937 - "GET /scripts/parse-jobs/42fae5f1097746d0932253341809dba8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49937 - "GET /scripts/parse-jobs/42fae5f1097746d0932253341809dba8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49937 - "GET /scripts/parse-jobs/42fae5f1097746d0932253341809dba8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49937 - "GET /scripts/parse-jobs/42fae5f1097746d0932253341809dba8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49937 - "GET /scripts/parse-jobs/42fae5f1097746d0932253341809dba8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49937 - "GET /scripts/parse-jobs/42fae5f1097746d0932253341809dba8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49937 - "GET /scripts/parse-jobs/42fae5f1097746d0932253341809dba8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49937 - "GET /scripts/parse-jobs/42fae5f1097746d0932253341809dba8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49937 - "GET /scripts/parse-jobs/42fae5f1097746d0932253341809dba8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49937 - "GET /scripts/parse-jobs/42fae5f1097746d0932253341809dba8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50220 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50220 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50220 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50220 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+WARNING:  WatchFiles detected changes in 'app/services/test_data_store.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [46829]
+INFO:     Started server process [47474]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'app/routes.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [47474]
+INFO:     Started server process [47509]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     127.0.0.1:51088 - "POST /dev/review/feedback HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51198 - "GET /dev/review/aliases?element_type=cast HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51198 - "GET /dev/review/aliases?element_type=cast HTTP/1.1" 200 OK

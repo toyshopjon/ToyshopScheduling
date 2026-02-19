@@ -36,6 +36,7 @@ def init_db() -> None:
               int_ext TEXT,
               time_of_day TEXT,
               page_eighths INTEGER DEFAULT 1,
+              est_time_minutes INTEGER DEFAULT 0,
               cast_csv TEXT DEFAULT '',
               props_csv TEXT DEFAULT '',
               wardrobe_csv TEXT DEFAULT '',
@@ -80,6 +81,7 @@ def init_db() -> None:
             """
         )
         _ensure_column(conn, "scenes", "sets_csv", "TEXT DEFAULT ''")
+        _ensure_column(conn, "scenes", "est_time_minutes", "INTEGER DEFAULT 0")
         _ensure_column(conn, "review_feedback", "predicted_sets_csv", "TEXT DEFAULT ''")
         _ensure_column(conn, "review_feedback", "corrected_sets_csv", "TEXT DEFAULT ''")
         _ensure_column(conn, "review_feedback", "manual_split", "INTEGER DEFAULT 0")
@@ -124,6 +126,7 @@ def seed_demo_data() -> dict:
                 "INT",
                 "NIGHT",
                 3,
+                45,
                 "RIPLEY,DALLAS,LAMBERT",
                 "MOTION TRACKER,TERMINAL",
                 "FLIGHT SUIT",
@@ -140,6 +143,7 @@ def seed_demo_data() -> dict:
                 "EXT",
                 "DAY",
                 5,
+                70,
                 "RIPLEY,KANE",
                 "ROVER,HELMET",
                 "SPACESUIT",
@@ -154,8 +158,8 @@ def seed_demo_data() -> dict:
             """
             INSERT INTO scenes(
               schedule_id, scene_number, heading, location, int_ext, time_of_day,
-              page_eighths, cast_csv, props_csv, wardrobe_csv, sets_csv, notes, script_text, source_order
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              page_eighths, est_time_minutes, cast_csv, props_csv, wardrobe_csv, sets_csv, notes, script_text, source_order
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             demo_scenes,
         )
@@ -191,7 +195,7 @@ def list_scenes(schedule_id: int) -> list[dict]:
         rows = conn.execute(
             """
             SELECT id, schedule_id, scene_number, heading, location, int_ext, time_of_day,
-                   page_eighths, cast_csv, props_csv, wardrobe_csv, sets_csv, notes, script_text, source_order
+                   page_eighths, est_time_minutes, cast_csv, props_csv, wardrobe_csv, sets_csv, notes, script_text, source_order
             FROM scenes
             WHERE schedule_id = ?
             ORDER BY source_order, scene_number, id
@@ -223,6 +227,7 @@ def replace_scenes(schedule_id: int, scenes: list[dict]) -> dict:
                     scene.get("int_ext", "INT"),
                     scene.get("time_of_day", "DAY"),
                     int(scene.get("page_eighths", 1)),
+                    int(scene.get("est_time_minutes", 0)),
                     scene.get("cast_csv", ""),
                     scene.get("props_csv", ""),
                     scene.get("wardrobe_csv", ""),
@@ -237,8 +242,8 @@ def replace_scenes(schedule_id: int, scenes: list[dict]) -> dict:
             """
             INSERT INTO scenes(
               schedule_id, scene_number, heading, location, int_ext, time_of_day,
-              page_eighths, cast_csv, props_csv, wardrobe_csv, sets_csv, notes, script_text, source_order
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              page_eighths, est_time_minutes, cast_csv, props_csv, wardrobe_csv, sets_csv, notes, script_text, source_order
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             payload,
         )
@@ -269,6 +274,57 @@ def _upsert_aliases(conn: sqlite3.Connection, element_type: str, corrected_csv: 
         )
         saved += 1
     return saved
+
+
+def _token_similarity(left: str, right: str) -> float:
+    l = left.strip().upper()
+    r = right.strip().upper()
+    if not l or not r:
+        return 0.0
+    if l == r:
+        return 1.0
+    if l in r or r in l:
+        return 0.9
+    l_parts = l.split()
+    r_parts = r.split()
+    if l_parts and r_parts and l_parts[0] == r_parts[0]:
+        return 0.75
+    overlap = len(set(l_parts) & set(r_parts))
+    if overlap:
+        return 0.65
+    return 0.0
+
+
+def _infer_alias_pairs(predicted_csv: str, corrected_csv: str) -> list[tuple[str, str]]:
+    predicted = sorted(_split_csv(predicted_csv))
+    corrected = sorted(_split_csv(corrected_csv))
+    if not predicted or not corrected:
+        return []
+
+    corrected_upper = {c.upper() for c in corrected}
+    predicted_upper = {p.upper() for p in predicted}
+    pred_only = [item for item in predicted if item.upper() not in corrected_upper]
+    corr_only = [item for item in corrected if item.upper() not in predicted_upper]
+    if not pred_only or not corr_only:
+        return []
+
+    pairs: list[tuple[str, str]] = []
+    used_corr: set[str] = set()
+    for pred in pred_only:
+        best = None
+        best_score = 0.0
+        for corr in corr_only:
+            corr_key = corr.upper()
+            if corr_key in used_corr:
+                continue
+            score = _token_similarity(pred, corr)
+            if score > best_score:
+                best = corr
+                best_score = score
+        if best and best_score >= 0.7:
+            pairs.append((pred, best))
+            used_corr.add(best.upper())
+    return pairs
 
 
 def save_review_feedback(entry: dict) -> dict:
@@ -313,6 +369,32 @@ def save_review_feedback(entry: dict) -> dict:
         aliases_saved += _upsert_aliases(conn, "sets", entry.get("corrected_sets_csv", ""))
         aliases_saved += _upsert_aliases(conn, "location", entry.get("corrected_location", ""))
 
+        for alias, canonical in _infer_alias_pairs(entry.get("predicted_cast_csv", ""), entry.get("corrected_cast_csv", "")):
+            conn.execute(
+                """
+                INSERT INTO element_aliases(element_type, alias, canonical, source)
+                VALUES ('cast', ?, ?, 'review')
+                ON CONFLICT(element_type, alias)
+                DO UPDATE SET canonical = excluded.canonical
+                """,
+                (alias.upper(), canonical),
+            )
+            aliases_saved += 1
+
+        predicted_location = str(entry.get("predicted_location", "")).strip()
+        corrected_location = str(entry.get("corrected_location", "")).strip()
+        if predicted_location and corrected_location and predicted_location.upper() != corrected_location.upper():
+            conn.execute(
+                """
+                INSERT INTO element_aliases(element_type, alias, canonical, source)
+                VALUES ('location', ?, ?, 'review')
+                ON CONFLICT(element_type, alias)
+                DO UPDATE SET canonical = excluded.canonical
+                """,
+                (predicted_location.upper(), corrected_location),
+            )
+            aliases_saved += 1
+
     return {"saved": True, "aliases_saved": aliases_saved}
 
 
@@ -328,6 +410,61 @@ def list_aliases(element_type: str | None = None) -> list[dict]:
                 "SELECT element_type, alias, canonical, source, created_at FROM element_aliases ORDER BY element_type, canonical",
             ).fetchall()
         return [dict(row) for row in rows]
+
+
+def get_alias_lookup(element_type: str) -> dict[str, str]:
+    rows = list_aliases(element_type)
+    lookup: dict[str, str] = {}
+    for row in rows:
+        alias = str(row.get("alias") or "").strip().upper()
+        canonical = str(row.get("canonical") or "").strip()
+        if alias and canonical:
+            lookup[alias] = canonical
+
+    # Backfill from historical review feedback so training applies even
+    # if aliases were not explicitly persisted at the time.
+    with get_conn() as conn:
+        if element_type == "cast":
+            feedback_rows = conn.execute(
+                "SELECT predicted_cast_csv, corrected_cast_csv FROM review_feedback"
+            ).fetchall()
+            for row in feedback_rows:
+                for alias, canonical in _infer_alias_pairs(row["predicted_cast_csv"], row["corrected_cast_csv"]):
+                    lookup.setdefault(alias.upper(), canonical)
+        elif element_type == "location":
+            feedback_rows = conn.execute(
+                "SELECT predicted_location, corrected_location FROM review_feedback"
+            ).fetchall()
+            for row in feedback_rows:
+                predicted = str(row["predicted_location"] or "").strip()
+                corrected = str(row["corrected_location"] or "").strip()
+                if predicted and corrected and predicted.upper() != corrected.upper():
+                    lookup.setdefault(predicted.upper(), corrected)
+    return lookup
+
+
+def upsert_alias(element_type: str, alias: str, canonical: str, source: str = "manual") -> dict:
+    normalized_type = str(element_type or "").strip().lower()
+    if normalized_type not in {"cast", "location", "props", "wardrobe", "sets"}:
+        raise ValueError(f"Unsupported element_type: {element_type}")
+
+    alias_value = str(alias or "").strip()
+    canonical_value = str(canonical or "").strip()
+    if not alias_value or not canonical_value:
+        raise ValueError("alias and canonical are required.")
+
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO element_aliases(element_type, alias, canonical, source)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(element_type, alias)
+            DO UPDATE SET canonical = excluded.canonical, source = excluded.source
+            """,
+            (normalized_type, alias_value.upper(), canonical_value, source),
+        )
+
+    return {"saved": True, "element_type": normalized_type, "alias": alias_value.upper(), "canonical": canonical_value}
 
 
 def get_review_metrics() -> dict:

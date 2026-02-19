@@ -6,6 +6,21 @@ import { Stripboard } from "./components/Stripboard";
 const STORAGE_KEY = "toyshop_scheduling_workspace_v1";
 const DEFAULT_SCHEDULE_DAYS = ["Day 1", "Day 2"];
 const UNSCHEDULED_DAY = "Unscheduled";
+const DEFAULT_STRIP_LAYOUT = {
+  fieldOrder: ["sceneNumber", "intExt", "timeOfDay", "heading", "location", "cast", "pageCount", "estTime"],
+  rowHeight: 30,
+  colorMode: "dayNight",
+  columnWidths: {
+    sceneNumber: 90,
+    intExt: 70,
+    timeOfDay: 110,
+    heading: 300,
+    location: 220,
+    cast: 260,
+    pageCount: 90,
+    estTime: 90,
+  },
+};
 const API_BASE_CANDIDATES = [
   import.meta.env.VITE_API_BASE_URL,
   "http://localhost:8000",
@@ -78,6 +93,23 @@ function createSchedule(name) {
       "Day 2": [],
       [UNSCHEDULED_DAY]: [],
     },
+    stripLayout: { ...DEFAULT_STRIP_LAYOUT },
+  };
+}
+
+function normalizeStripLayout(candidate) {
+  if (!candidate || typeof candidate !== "object") return { ...DEFAULT_STRIP_LAYOUT };
+  const fieldOrder = Array.isArray(candidate.fieldOrder) && candidate.fieldOrder.length
+    ? candidate.fieldOrder
+    : DEFAULT_STRIP_LAYOUT.fieldOrder;
+  return {
+    fieldOrder: [...fieldOrder],
+    rowHeight: Number.isFinite(candidate.rowHeight) ? Math.max(22, Math.min(84, candidate.rowHeight)) : DEFAULT_STRIP_LAYOUT.rowHeight,
+    colorMode: ["dayNight", "intExt", "none"].includes(candidate.colorMode) ? candidate.colorMode : DEFAULT_STRIP_LAYOUT.colorMode,
+    columnWidths: {
+      ...DEFAULT_STRIP_LAYOUT.columnWidths,
+      ...(candidate.columnWidths && typeof candidate.columnWidths === "object" ? candidate.columnWidths : {}),
+    },
   };
 }
 
@@ -123,6 +155,7 @@ function normalizeWorkspace(candidate) {
             name: schedule.name || `Schedule ${scheduleIndex + 1}`,
             days,
             stripsByDay,
+            stripLayout: normalizeStripLayout(schedule.stripLayout),
           };
         })
       : [createSchedule("Schedule 1")];
@@ -191,6 +224,7 @@ function buildStripFromParsedScene(scene, index, fallbackIdPrefix = "scene") {
     cast: Array.isArray(scene.cast) ? scene.cast : [],
     needsReview: Boolean(scene.needs_review),
     pageEighths: estimateVisualPageEighths(scriptText),
+    estTimeMinutes: Number.isFinite(scene.est_time_minutes) ? Math.max(0, scene.est_time_minutes) : 0,
     intExt: scene.int_ext || inferIntExt(scene.heading),
     timeOfDay: inferTimeOfDay(scene.heading, scene.time_of_day),
     props: [],
@@ -208,6 +242,7 @@ function buildParsedSceneFromStrip(strip, index) {
     location: strip.location || "",
     int_ext: strip.intExt || inferIntExt(strip.heading),
     time_of_day: strip.timeOfDay || "DAY",
+    est_time_minutes: Number.isFinite(strip.estTimeMinutes) ? Math.max(0, strip.estTimeMinutes) : 0,
     scene_text: strip.scriptText || "",
     cast: Array.isArray(strip.cast) ? strip.cast : [],
     needs_review: Boolean(strip.needsReview),
@@ -222,12 +257,31 @@ export default function App() {
   const [reviewQueue, setReviewQueue] = useState([]);
   const [dbStatus, setDbStatus] = useState("");
   const [parseStatus, setParseStatus] = useState("");
+  const [parseProgress, setParseProgress] = useState({ active: false, percent: 0, error: false });
+  const [trainingAliasCount, setTrainingAliasCount] = useState(0);
   const parseUploaderRef = useRef(null);
   const menuBarRef = useRef(null);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(workspace));
   }, [workspace]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadTrainingPreview() {
+      try {
+        const { payload } = await fetchJson("/dev/review/aliases?element_type=cast");
+        const aliases = Array.isArray(payload?.aliases) ? payload.aliases : [];
+        if (!cancelled) setTrainingAliasCount(aliases.length);
+      } catch {
+        if (!cancelled) setTrainingAliasCount(0);
+      }
+    }
+    loadTrainingPreview();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     function closeMenusIfOutside(event) {
@@ -346,6 +400,7 @@ export default function App() {
               pageEighths: Number.isFinite(scene.page_eighths)
                 ? Math.max(1, scene.page_eighths)
                 : estimateVisualPageEighths(scriptText),
+              estTimeMinutes: Number.isFinite(scene.est_time_minutes) ? Math.max(0, scene.est_time_minutes) : 0,
               intExt: scene.int_ext || inferIntExt(scene.heading),
               timeOfDay: scene.time_of_day || inferTimeOfDay(scene.heading, null),
               props: parseCsvList(scene.props_csv),
@@ -366,6 +421,7 @@ export default function App() {
               "Day 1": [],
               "Day 2": [],
             },
+            stripLayout: { ...DEFAULT_STRIP_LAYOUT },
           };
         });
 
@@ -451,6 +507,7 @@ export default function App() {
           int_ext: scene.intExt || "INT",
           time_of_day: scene.timeOfDay || "DAY",
           page_eighths: Number.isFinite(scene.pageEighths) ? scene.pageEighths : 1,
+          est_time_minutes: Number.isFinite(scene.estTimeMinutes) ? Math.max(0, scene.estTimeMinutes) : 0,
           cast_csv: toCsv(scene.cast),
           props_csv: toCsv(scene.props),
           wardrobe_csv: toCsv(scene.wardrobe),
@@ -480,6 +537,22 @@ export default function App() {
       });
     } catch {
       // Keep review flow non-blocking if feedback API is unavailable.
+    }
+  }
+
+  async function saveManualAliasCorrection(payload) {
+    try {
+      await fetchJson("/dev/review/aliases", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const { payload: aliasPayload } = await fetchJson("/dev/review/aliases?element_type=cast");
+      const aliases = Array.isArray(aliasPayload?.aliases) ? aliasPayload.aliases : [];
+      setTrainingAliasCount(aliases.length);
+      setDbStatus(`Saved training correction: ${payload.alias} -> ${payload.canonical}`);
+    } catch (error) {
+      setDbStatus(`Training correction failed: ${error instanceof Error ? error.message : "Unknown error"}`);
     }
   }
 
@@ -556,6 +629,7 @@ export default function App() {
         cast: Array.isArray(scene.cast) ? scene.cast : [],
         needsReview: !(Array.isArray(scene.cast) && scene.cast.length),
         pageEighths: estimateVisualPageEighths(scriptText),
+        estTimeMinutes: Number.isFinite(scene.est_time_minutes) ? Math.max(0, scene.est_time_minutes) : 0,
         intExt: scene.int_ext || inferIntExt(scene.heading),
         timeOfDay: inferTimeOfDay(scene.heading, scene.time_of_day),
         props: Array.isArray(scene.props) ? scene.props : [],
@@ -614,6 +688,7 @@ export default function App() {
             timeOfDay: inferTimeOfDay(scene.heading, scene.time_of_day),
             scriptText: scene.scene_text || "",
             pageEighths: estimateVisualPageEighths(scene.scene_text || ""),
+            estTimeMinutes: Number.isFinite(scene.est_time_minutes) ? Math.max(0, scene.est_time_minutes) : (matched.strip.estTimeMinutes || 0),
             sourceOrder: orderIndex,
           });
           return;
@@ -700,6 +775,13 @@ export default function App() {
     });
   }
 
+  function setStripLayoutForActiveSchedule(nextLayout) {
+    updateActiveSchedule((schedule) => ({
+      ...schedule,
+      stripLayout: normalizeStripLayout(nextLayout),
+    }));
+  }
+
   function addProject() {
     setWorkspace((prev) => {
       const nextProject = createProject(`Project ${prev.projects.length + 1}`);
@@ -767,6 +849,7 @@ export default function App() {
           name: `${activeSchedule.name} Copy ${copyNumber}`,
           days: [...activeSchedule.days],
           stripsByDay: JSON.parse(JSON.stringify(activeSchedule.stripsByDay)),
+          stripLayout: normalizeStripLayout(activeSchedule.stripLayout),
         };
 
         return {
@@ -869,6 +952,13 @@ export default function App() {
           ref={parseUploaderRef}
           showControls={false}
           onStatusChange={setParseStatus}
+          onProgressChange={(progress) => {
+            setParseProgress({
+              active: Boolean(progress?.active),
+              percent: Number.isFinite(progress?.percent) ? Math.max(0, Math.min(100, progress.percent)) : 0,
+              error: Boolean(progress?.error),
+            });
+          }}
           onParsed={(payload) => {
             startReview(payload.scenes);
           }}
@@ -894,7 +984,15 @@ export default function App() {
                   : "Review"}
           </span>
           {dbStatus ? <span><strong>DB:</strong> {dbStatus}</span> : null}
-          {parseStatus ? <span><strong>Parse:</strong> {parseStatus}</span> : null}
+          <span><strong>Training Aliases:</strong> {trainingAliasCount}</span>
+          {parseStatus ? (
+            <span className="parse-status-wrap">
+              <strong>Parse:</strong> {parseStatus}
+              <span className={parseProgress.error ? "parse-progress is-error" : "parse-progress"}>
+                <span style={{ width: `${parseProgress.percent}%` }} />
+              </span>
+            </span>
+          ) : null}
         </div>
       </section>
 
@@ -926,6 +1024,7 @@ export default function App() {
                   <p><strong>INT/EXT:</strong> {selectedFullScriptScene.intExt}</p>
                   <p><strong>Time:</strong> {selectedFullScriptScene.timeOfDay}</p>
                   <p><strong>Page Count:</strong> {formatPageEighths(selectedFullScriptScene.pageEighths)}</p>
+                  <p><strong>Est. Time:</strong> {selectedFullScriptScene.estTimeMinutes || 0} min</p>
                   <p><strong>Cast:</strong> {(selectedFullScriptScene.cast ?? []).join(", ") || "None"}</p>
                   <p><strong>Props:</strong> {(selectedFullScriptScene.props ?? []).join(", ") || "None"}</p>
                   <p><strong>Wardrobe:</strong> {(selectedFullScriptScene.wardrobe ?? []).join(", ") || "None"}</p>
@@ -949,6 +1048,12 @@ export default function App() {
             showElementsView
             reportView="none"
             showWorkbench={false}
+            layoutConfig={activeSchedule.stripLayout}
+            onSaveLayoutConfig={setStripLayoutForActiveSchedule}
+            onReturnToStripView={() => {
+              setActiveView("schedule");
+              setReportView("stripboard");
+            }}
           />
         </section>
       ) : null}
@@ -957,6 +1062,7 @@ export default function App() {
         <SceneReviewMode
           parsedScenes={reviewQueue}
           onSaveFeedback={saveReviewFeedback}
+          onSaveAlias={saveManualAliasCorrection}
           onComplete={(reviewedScenes) => {
             applyReviewedScenes(reviewedScenes);
             setReviewQueue([]);
@@ -992,6 +1098,8 @@ export default function App() {
             showElementsView={false}
             reportView={reportView}
             showWorkbench
+            layoutConfig={activeSchedule.stripLayout}
+            onSaveLayoutConfig={setStripLayoutForActiveSchedule}
           />
         </section>
       ) : null}

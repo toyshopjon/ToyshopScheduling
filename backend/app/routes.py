@@ -4,8 +4,10 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from app.services.parser import ScriptParser
+from app.services.parse_jobs import parse_jobs, serialize_job
 from app.services.test_data_store import (
     export_review_jsonl,
+    get_alias_lookup,
     get_review_metrics,
     list_projects,
     list_schedules,
@@ -14,6 +16,7 @@ from app.services.test_data_store import (
     replace_scenes,
     save_review_feedback,
     seed_demo_data,
+    upsert_alias,
 )
 
 router = APIRouter()
@@ -27,6 +30,7 @@ class ScenePayload(BaseModel):
     int_ext: str = "INT"
     time_of_day: str = "DAY"
     page_eighths: int = 1
+    est_time_minutes: int = 0
     cast_csv: str = ""
     props_csv: str = ""
     wardrobe_csv: str = ""
@@ -60,6 +64,13 @@ class ReviewFeedbackPayload(BaseModel):
     split_selected_text: str = ""
 
 
+class AliasPayload(BaseModel):
+    element_type: str
+    alias: str
+    canonical: str
+    source: str = "manual"
+
+
 @router.post("/scripts/parse")
 async def parse_script(file: UploadFile = File(...)) -> dict:
     filename = file.filename or ""
@@ -70,13 +81,35 @@ async def parse_script(file: UploadFile = File(...)) -> dict:
     if not payload:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 
-    result = parser.parse_pdf(payload)
+    result = parser.parse_pdf(payload, alias_map=get_alias_lookup("cast"))
     return {
         "filename": filename,
         "scene_count": len(result["scenes"]),
         "needs_review_count": result["needs_review_count"],
         "scenes": result["scenes"],
     }
+
+
+@router.post("/scripts/parse-jobs")
+async def create_parse_job(file: UploadFile = File(...)) -> dict:
+    filename = file.filename or ""
+    if not filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF uploads are supported.")
+
+    payload = await file.read()
+    if not payload:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
+    job = parse_jobs.start(parser, payload, filename, alias_map=get_alias_lookup("cast"))
+    return {"job_id": job.id, "status": job.status, "progress": job.progress, "message": job.message}
+
+
+@router.get("/scripts/parse-jobs/{job_id}")
+def get_parse_job(job_id: str) -> dict[str, Any]:
+    job = parse_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Parse job {job_id} not found.")
+    return serialize_job(job)
 
 
 @router.post("/dev/seed-test-data")
@@ -119,6 +152,19 @@ def save_feedback(payload: ReviewFeedbackPayload) -> dict[str, Any]:
 @router.get("/dev/review/aliases")
 def get_aliases(element_type: str | None = None) -> dict:
     return {"aliases": list_aliases(element_type)}
+
+
+@router.post("/dev/review/aliases")
+def save_alias(payload: AliasPayload) -> dict[str, Any]:
+    try:
+        return upsert_alias(
+            payload.element_type,
+            payload.alias,
+            payload.canonical,
+            payload.source,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
 
 @router.get("/dev/review/metrics")
