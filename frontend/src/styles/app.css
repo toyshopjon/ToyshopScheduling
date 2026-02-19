@@ -177,8 +177,9 @@ body {
 
 .strip-split-layout {
   display: grid;
-  grid-template-columns: minmax(300px, 1fr) minmax(0, 2fr);
+  grid-template-columns: 33% 8px 67%;
   gap: 10px;
+  align-items: start;
 }
 
 .strip-split-layout.unscheduled-hidden {
@@ -197,9 +198,37 @@ body {
 
 .scene-table-wrap {
   overflow: auto;
+  overscroll-behavior: contain;
   border: 1px solid #d3dbe6;
   border-radius: 8px;
   background: #ffffff;
+}
+
+.pane-splitter {
+  width: 8px;
+  min-height: 40px;
+  border-radius: 6px;
+  border: 1px solid #d0d8e6;
+  background: linear-gradient(180deg, #f5f8ff, #e7edf8);
+  cursor: col-resize;
+}
+
+.pane-splitter:hover {
+  border-color: #94a8cc;
+  background: linear-gradient(180deg, #eef3ff, #dde8fb);
+}
+
+.pane-header {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: #f2f5fb;
+  border-bottom: 1px solid #d8e0ee;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
 }
 
 .scene-table {
@@ -263,6 +292,28 @@ body {
   color: #ffffff;
   font-weight: 700;
   letter-spacing: 0.01em;
+}
+
+.day-break-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.day-break-delete {
+  border: 1px solid #4f5b75;
+  background: #1f2b45;
+  color: #ffffff;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.day-break-delete:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .layout-builder {
@@ -688,6 +739,55 @@ body {
   font-size: 13px;
 }
 
+.review-line-items {
+  border: 1px solid #d3dbe6;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 8px;
+}
+
+.review-line-items h4 {
+  margin: 0 0 8px;
+}
+
+.review-line-list {
+  display: grid;
+  gap: 4px;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.review-line-row {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 8px;
+  align-items: start;
+}
+
+.review-line-row pre {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+}
+
+.review-line-type {
+  display: inline-block;
+  text-transform: uppercase;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 4px;
+  padding: 2px 6px;
+  letter-spacing: 0.02em;
+}
+
+.review-type-heading { background: #d9e4ff; color: #253a7a; }
+.review-type-character_cue { background: #ffe7c8; color: #7a4c10; }
+.review-type-parenthetical { background: #eee3ff; color: #4d2b8a; }
+.review-type-dialogue { background: #dff7ea; color: #1e653d; }
+.review-type-action { background: #f0f2f6; color: #3b465c; }
+.review-type-blank { background: #fafafa; color: #7a7a7a; }
+
 .inline-suggest .suggest-add {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -769,6 +869,10 @@ body {
     grid-template-columns: 1fr;
   }
 
+  .pane-splitter {
+    display: none;
+  }
+
   .board-shell {
     grid-template-columns: 1fr;
   }
@@ -789,6 +893,10 @@ body {
 
   .editor-actions {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .review-correction-row {
+    grid-template-columns: 1fr;
   }
 
   .entity-layout {

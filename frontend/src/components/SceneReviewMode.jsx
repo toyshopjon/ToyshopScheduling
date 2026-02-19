@@ -85,8 +85,10 @@ function asReviewScene(scene, index) {
     int_ext: scene.int_ext || inferIntExtFromHeading(scene.heading, "INT"),
     time_of_day: scene.time_of_day || "DAY",
     script_text: scene.scene_text || "",
+    line_items: Array.isArray(scene.line_items) ? scene.line_items : [],
     predicted: {
       cast: predictedCast,
+      background: [],
       location: scene.location || "",
       props: [],
       wardrobe: [],
@@ -94,6 +96,7 @@ function asReviewScene(scene, index) {
     },
     corrected: {
       cast: predictedCast,
+      background: Array.isArray(scene.background) ? scene.background : [],
       location: scene.location || "",
       props: [],
       wardrobe: [],
@@ -143,9 +146,9 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
   const [scenes, setScenes] = useState(() => parsedScenes.map((scene, index) => asReviewScene(scene, index)));
   const [index, setIndex] = useState(0);
   const [splitError, setSplitError] = useState("");
-  const [aliasForm, setAliasForm] = useState({ elementType: "cast", alias: "", canonical: "" });
+  const [aliasForm, setAliasForm] = useState({ elementType: "cast", alias: "", canonical: "", ignore: false });
   const [aliasStatus, setAliasStatus] = useState("");
-  const [inputs, setInputs] = useState({ cast: "", location: "", props: "", wardrobe: "", sets: "" });
+  const [inputs, setInputs] = useState({ cast: "", background: "", location: "", props: "", wardrobe: "", sets: "" });
   const scriptTextRef = useRef(null);
 
   const current = scenes[index];
@@ -160,6 +163,7 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
 
   const knownElements = useMemo(() => {
     const cast = new Set();
+    const background = new Set();
     const locations = new Set();
     const props = new Set();
     const wardrobe = new Set();
@@ -167,6 +171,7 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
 
     for (let i = 0; i <= index; i += 1) {
       for (const name of scenes[i].corrected.cast) cast.add(name);
+      for (const item of scenes[i].corrected.background) background.add(item);
       if (scenes[i].corrected.location) locations.add(scenes[i].corrected.location);
       for (const item of scenes[i].corrected.props) props.add(item);
       for (const item of scenes[i].corrected.wardrobe) wardrobe.add(item);
@@ -175,6 +180,7 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
 
     return {
       cast: Array.from(cast).sort((a, b) => a.localeCompare(b)),
+      background: Array.from(background).sort((a, b) => a.localeCompare(b)),
       locations: Array.from(locations).sort((a, b) => a.localeCompare(b)),
       props: Array.from(props).sort((a, b) => a.localeCompare(b)),
       wardrobe: Array.from(wardrobe).sort((a, b) => a.localeCompare(b)),
@@ -356,6 +362,8 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
       script_text: scene.script_text,
       predicted_cast_csv: toCsv(scene.predicted.cast),
       corrected_cast_csv: toCsv(scene.corrected.cast),
+      predicted_background_csv: toCsv(scene.predicted.background),
+      corrected_background_csv: toCsv(scene.corrected.background),
       predicted_location: scene.predicted.location,
       corrected_location: scene.corrected.location,
       predicted_props_csv: toCsv(scene.predicted.props),
@@ -414,6 +422,7 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
         int_ext: scene.int_ext,
         time_of_day: scene.time_of_day,
         cast: scene.corrected.cast,
+        background: scene.corrected.background,
         props: scene.corrected.props,
         wardrobe: scene.corrected.wardrobe,
         sets: scene.corrected.sets,
@@ -427,8 +436,8 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
   async function saveAliasCorrection() {
     const alias = aliasForm.alias.trim();
     const canonical = aliasForm.canonical.trim();
-    if (!alias || !canonical) {
-      setAliasStatus("Enter both Alias and Canonical values.");
+    if (!alias || (!aliasForm.ignore && !canonical)) {
+      setAliasStatus(aliasForm.ignore ? "Enter Alias value." : "Enter both Alias and Canonical values.");
       return;
     }
     try {
@@ -436,10 +445,15 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
         element_type: aliasForm.elementType,
         alias,
         canonical,
+        ignore: Boolean(aliasForm.ignore),
         source: "manual",
       });
-      setAliasStatus(`Saved correction: ${alias.toUpperCase()} -> ${canonical}`);
-      setAliasForm((prev) => ({ ...prev, alias: "" }));
+      setAliasStatus(
+        aliasForm.ignore
+          ? `Saved ignore rule: ${alias.toUpperCase()}`
+          : `Saved correction: ${alias.toUpperCase()} -> ${canonical}`
+      );
+      setAliasForm((prev) => ({ ...prev, alias: "", canonical: prev.ignore ? "" : prev.canonical }));
     } catch {
       setAliasStatus("Failed to save correction.");
     }
@@ -513,6 +527,17 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
           onAdd={(value) => addToken("cast", value)}
           onRemove={(value) => removeToken("cast", value)}
           placeholder="Add cast"
+        />
+
+        <ChipListEditor
+          title="Background"
+          values={current.corrected.background}
+          suggestions={knownElements.background}
+          inputValue={inputs.background}
+          onInputChange={(value) => setInputs((prev) => ({ ...prev, background: value }))}
+          onAdd={(value) => addToken("background", value)}
+          onRemove={(value) => removeToken("background", value)}
+          placeholder="Add background"
         />
 
         <div className="chip-editor">
@@ -602,7 +627,7 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
 
       <div className="review-correction">
         <h4>Manual Training Correction</h4>
-        <p>Use this when parser output is clearly wrong. Example: `JON` -> `JON SMITH`.</p>
+        <p>Use this when parser output is clearly wrong. Example: `JON` to `JON SMITH`.</p>
         <div className="review-correction-row">
           <label>
             Element
@@ -627,8 +652,17 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
             <input
               type="text"
               value={aliasForm.canonical}
+              disabled={aliasForm.ignore}
               onChange={(event) => setAliasForm((prev) => ({ ...prev, canonical: event.target.value }))}
             />
+          </label>
+          <label className="inline-check">
+            <input
+              type="checkbox"
+              checked={aliasForm.ignore}
+              onChange={(event) => setAliasForm((prev) => ({ ...prev, ignore: event.target.checked }))}
+            />
+            Ignore Alias
           </label>
           <button type="button" onClick={saveAliasCorrection}>Save Correction</button>
         </div>
@@ -642,6 +676,22 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
         value={current.script_text}
         onChange={(event) => updateCurrent((scene) => ({ ...scene, script_text: event.target.value }))}
       />
+
+      <div className="review-line-items">
+        <h4>Line Classification (Beta)</h4>
+        {!current.line_items.length ? (
+          <p>No line tagging available for this scene.</p>
+        ) : (
+          <div className="review-line-list">
+            {current.line_items.map((item, lineIndex) => (
+              <div key={`${current.scene_number}-${lineIndex}`} className="review-line-row">
+                <span className={`review-line-type review-type-${item.type || "action"}`}>{item.type || "action"}</span>
+                <pre>{item.text || ""}</pre>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </section>
   );
 }

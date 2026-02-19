@@ -32,6 +32,7 @@ ALL_CAPS_TOKEN_PATTERN = re.compile(
     r"\b[A-Z][A-Z0-9'’\-]+(?:\s+[A-Z][A-Z0-9'’\-]+){0,2}\b"
 )
 TRAILING_PAREN_PATTERN = re.compile(r"\s*\([^)]*\)\s*$")
+INLINE_PAREN_PATTERN = re.compile(r"\([^)]*\)")
 STOP_CHARACTER_TOKENS = {
     "INT",
     "EXT",
@@ -50,6 +51,19 @@ STOP_CHARACTER_TOKENS = {
     "FADE OUT",
     "TEXT CARD",
 }
+NOISE_CHARACTER_TOKENS = {
+    "I",
+    "I'",
+    "I’",
+    "I'M",
+    "I’M",
+    "I'LL",
+    "I’LL",
+    "I'D",
+    "I’D",
+    "I'VE",
+    "I’VE",
+}
 
 
 @dataclass
@@ -60,6 +74,7 @@ class Scene:
     time_of_day: str
     cast: list[str]
     scene_text: str
+    line_items: list[dict[str, str]]
     confidence: float
     needs_review: bool
 
@@ -168,8 +183,9 @@ class ScriptParser:
                 cue_name = self._extract_character_cue(stripped_line)
                 if cue_name:
                     canonical = self._canonicalize_alias(cue_name, alias_map)
-                    speaking_cast.add(canonical)
-                    all_speaking_characters.add(canonical)
+                    if canonical:
+                        speaking_cast.add(canonical)
+                        all_speaking_characters.add(canonical)
             if progress_callback:
                 line_progress = 65 + int((line_index / total_lines) * 25)
                 if line_progress != last_line_progress:
@@ -220,7 +236,7 @@ class ScriptParser:
 
         line = TRAILING_PAREN_PATTERN.sub("", line).strip()
         line = re.sub(r"\s+", " ", line)
-        if not line or line in STOP_CHARACTER_TOKENS:
+        if not line or self._is_noise_character_token(line):
             return None
 
         return line
@@ -234,14 +250,19 @@ class ScriptParser:
         if stripped == stripped.upper():
             return set()
 
+        # Ignore descriptor text inside parentheses (e.g., "JOE (MAN, 60S)")
+        # so generic descriptors do not become cast elements.
+        sanitized = INLINE_PAREN_PATTERN.sub(" ", stripped)
         mentions: set[str] = set()
-        for match in ALL_CAPS_TOKEN_PATTERN.finditer(stripped):
+        for match in ALL_CAPS_TOKEN_PATTERN.finditer(sanitized):
             token = re.sub(r"\s+", " ", match.group(0).strip())
             token = token.strip(".,;:!?")
             token = TRAILING_PAREN_PATTERN.sub("", token).strip()
-            if not token or token in STOP_CHARACTER_TOKENS:
+            if not token or self._is_noise_character_token(token):
                 continue
-            mentions.add(self._canonicalize_alias(token, alias_map))
+            canonical = self._canonicalize_alias(token, alias_map)
+            if canonical:
+                mentions.add(canonical)
         return mentions
 
     def _find_speaking_mentions(self, raw_line: str, speaking_characters: set[str]) -> set[str]:
@@ -257,13 +278,19 @@ class ScriptParser:
 
     def _augment_scene_cast(self, scene: Scene, speaking_characters: set[str], alias_map: dict[str, str]) -> Scene:
         cast = set(scene.cast)
-        for raw_line in scene.scene_text.split("\n"):
+        raw_lines = scene.scene_text.split("\n")
+        line_items = scene.line_items if scene.line_items else self._classify_scene_lines(raw_lines)
+        for idx, raw_line in enumerate(raw_lines):
+            line_type = line_items[idx]["type"] if idx < len(line_items) and line_items[idx].get("type") else "action"
             stripped_line = raw_line.strip()
             if self._is_scene_heading_line(stripped_line):
                 continue
-            cast.update(self._extract_intro_mentions(raw_line, alias_map))
-            cast.update(self._find_speaking_mentions(raw_line, speaking_characters))
-            cast.update(self._find_alias_mentions(raw_line, alias_map))
+            # Rule: dialogue-only mentions do not add cast. We only infer
+            # additional cast from action lines (plus explicit character cues).
+            if line_type == "action":
+                cast.update(self._extract_intro_mentions(raw_line, alias_map))
+                cast.update(self._find_speaking_mentions(raw_line, speaking_characters))
+                cast.update(self._find_alias_mentions(raw_line, alias_map))
 
         updated_cast = sorted(cast)
         confidence = 0.95 if updated_cast else 0.78
@@ -275,6 +302,7 @@ class ScriptParser:
             time_of_day=scene.time_of_day,
             cast=updated_cast,
             scene_text=scene.scene_text,
+            line_items=scene.line_items,
             confidence=confidence,
             needs_review=needs_review,
         )
@@ -292,6 +320,7 @@ class ScriptParser:
         confidence = 0.95 if sorted_cast else 0.78
         needs_review = not sorted_cast
         scene_text = "\n".join(scene_lines)
+        line_items = self._classify_scene_lines(scene_lines)
         return Scene(
             number=number,
             heading=heading,
@@ -299,6 +328,7 @@ class ScriptParser:
             time_of_day=time_of_day,
             cast=sorted_cast,
             scene_text=scene_text,
+            line_items=line_items,
             confidence=confidence,
             needs_review=needs_review,
         )
@@ -311,6 +341,7 @@ class ScriptParser:
             "time_of_day": scene.time_of_day,
             "cast": scene.cast,
             "scene_text": scene.scene_text,
+            "line_items": scene.line_items,
             "confidence": scene.confidence,
             "needs_review": scene.needs_review,
         }
@@ -319,7 +350,10 @@ class ScriptParser:
         key = str(token or "").strip().upper()
         if not key:
             return ""
-        return str(alias_map.get(key) or token).strip()
+        mapped = str(alias_map.get(key) or token).strip()
+        if mapped.upper() == "__IGNORE__":
+            return ""
+        return mapped
 
     def _find_alias_mentions(self, raw_line: str, alias_map: dict[str, str]) -> set[str]:
         if not alias_map:
@@ -329,7 +363,9 @@ class ScriptParser:
         for alias, canonical in alias_map.items():
             pattern = rf"(?<![A-Z0-9]){re.escape(alias)}(?![A-Z0-9])"
             if re.search(pattern, upper_line):
-                found.add(canonical)
+                value = str(canonical or "").strip()
+                if value and value.upper() != "__IGNORE__":
+                    found.add(value)
         return found
 
     def _is_page_number_line(self, stripped_line: str) -> bool:
@@ -377,3 +413,61 @@ class ScriptParser:
         cleaned = re.sub(r"^[\s.\-:;]+", "", str(value or ""))
         cleaned = re.sub(r"\s+", " ", cleaned).strip()
         return cleaned.upper()
+
+    def _classify_scene_lines(self, scene_lines: list[str]) -> list[dict[str, str]]:
+        line_items: list[dict[str, str]] = []
+        state = "action"
+        dialogue_line_budget = 0
+
+        for raw_line in scene_lines:
+            stripped = raw_line.strip()
+            line_type = "action"
+
+            if not stripped:
+                line_type = "blank"
+                state = "action"
+                dialogue_line_budget = 0
+            elif self._is_scene_heading_line(stripped):
+                line_type = "heading"
+                state = "action"
+                dialogue_line_budget = 0
+            elif self._extract_character_cue(stripped):
+                line_type = "character_cue"
+                state = "cue"
+                dialogue_line_budget = 4
+            elif stripped.startswith("(") and stripped.endswith(")") and state in {"cue", "dialogue"}:
+                line_type = "parenthetical"
+                state = "dialogue"
+            elif state in {"cue", "dialogue"} and dialogue_line_budget > 0:
+                if stripped == stripped.upper() and len(stripped.split()) <= 4 and stripped.endswith(":"):
+                    line_type = "character_cue"
+                    state = "cue"
+                    dialogue_line_budget = 4
+                else:
+                    line_type = "dialogue"
+                    state = "dialogue"
+                    dialogue_line_budget -= 1
+            else:
+                line_type = "action"
+                state = "action"
+                dialogue_line_budget = 0
+
+            line_items.append({"type": line_type, "text": raw_line})
+
+        return line_items
+
+    def _is_noise_character_token(self, token: str) -> bool:
+        normalized = str(token or "").strip().upper()
+        if not normalized:
+            return True
+        if normalized in STOP_CHARACTER_TOKENS:
+            return True
+        if normalized in NOISE_CHARACTER_TOKENS:
+            return True
+        # OCR often breaks contractions into a dangling apostrophe fragment ("I'").
+        if normalized.endswith("'") or normalized.endswith("’"):
+            return True
+        # Keep real apostrophe names like O'BRIEN, but reject tiny fragments like D' or I'.
+        if ("'" in normalized or "’" in normalized) and len(normalized.replace("'", "").replace("’", "")) < 3:
+            return True
+        return False

@@ -7,9 +7,10 @@ const STORAGE_KEY = "toyshop_scheduling_workspace_v1";
 const DEFAULT_SCHEDULE_DAYS = ["Day 1", "Day 2"];
 const UNSCHEDULED_DAY = "Unscheduled";
 const DEFAULT_STRIP_LAYOUT = {
-  fieldOrder: ["sceneNumber", "intExt", "timeOfDay", "heading", "location", "cast", "pageCount", "estTime"],
+  fieldOrder: ["sceneNumber", "intExt", "timeOfDay", "location", "cast", "background", "pageCount", "estTime"],
   rowHeight: 30,
   colorMode: "dayNight",
+  paneSplitPercent: 33,
   columnWidths: {
     sceneNumber: 90,
     intExt: 70,
@@ -17,6 +18,7 @@ const DEFAULT_STRIP_LAYOUT = {
     heading: 300,
     location: 220,
     cast: 260,
+    background: 220,
     pageCount: 90,
     estTime: 90,
   },
@@ -106,6 +108,7 @@ function normalizeStripLayout(candidate) {
     fieldOrder: [...fieldOrder],
     rowHeight: Number.isFinite(candidate.rowHeight) ? Math.max(22, Math.min(84, candidate.rowHeight)) : DEFAULT_STRIP_LAYOUT.rowHeight,
     colorMode: ["dayNight", "intExt", "none"].includes(candidate.colorMode) ? candidate.colorMode : DEFAULT_STRIP_LAYOUT.colorMode,
+    paneSplitPercent: Number.isFinite(candidate.paneSplitPercent) ? Math.max(20, Math.min(80, candidate.paneSplitPercent)) : DEFAULT_STRIP_LAYOUT.paneSplitPercent,
     columnWidths: {
       ...DEFAULT_STRIP_LAYOUT.columnWidths,
       ...(candidate.columnWidths && typeof candidate.columnWidths === "object" ? candidate.columnWidths : {}),
@@ -222,6 +225,7 @@ function buildStripFromParsedScene(scene, index, fallbackIdPrefix = "scene") {
     heading: scene.heading,
     location: scene.location,
     cast: Array.isArray(scene.cast) ? scene.cast : [],
+    background: Array.isArray(scene.background) ? scene.background : [],
     needsReview: Boolean(scene.needs_review),
     pageEighths: estimateVisualPageEighths(scriptText),
     estTimeMinutes: Number.isFinite(scene.est_time_minutes) ? Math.max(0, scene.est_time_minutes) : 0,
@@ -245,6 +249,7 @@ function buildParsedSceneFromStrip(strip, index) {
     est_time_minutes: Number.isFinite(strip.estTimeMinutes) ? Math.max(0, strip.estTimeMinutes) : 0,
     scene_text: strip.scriptText || "",
     cast: Array.isArray(strip.cast) ? strip.cast : [],
+    background: Array.isArray(strip.background) ? strip.background : [],
     needs_review: Boolean(strip.needsReview),
   };
 }
@@ -396,6 +401,7 @@ export default function App() {
               heading: scene.heading,
               location: scene.location || "",
               cast: parseCsvList(scene.cast_csv),
+              background: parseCsvList(scene.background_csv),
               needsReview: parseCsvList(scene.cast_csv).length === 0,
               pageEighths: Number.isFinite(scene.page_eighths)
                 ? Math.max(1, scene.page_eighths)
@@ -509,6 +515,7 @@ export default function App() {
           page_eighths: Number.isFinite(scene.pageEighths) ? scene.pageEighths : 1,
           est_time_minutes: Number.isFinite(scene.estTimeMinutes) ? Math.max(0, scene.estTimeMinutes) : 0,
           cast_csv: toCsv(scene.cast),
+          background_csv: toCsv(scene.background),
           props_csv: toCsv(scene.props),
           wardrobe_csv: toCsv(scene.wardrobe),
           sets_csv: toCsv(scene.sets),
@@ -627,6 +634,7 @@ export default function App() {
         heading: scene.heading,
         location: scene.location || "",
         cast: Array.isArray(scene.cast) ? scene.cast : [],
+        background: Array.isArray(scene.background) ? scene.background : [],
         needsReview: !(Array.isArray(scene.cast) && scene.cast.length),
         pageEighths: estimateVisualPageEighths(scriptText),
         estTimeMinutes: Number.isFinite(scene.est_time_minutes) ? Math.max(0, scene.est_time_minutes) : 0,
@@ -683,6 +691,7 @@ export default function App() {
             heading: scene.heading,
             location: scene.location,
             cast: Array.isArray(scene.cast) ? scene.cast : [],
+            background: Array.isArray(scene.background) ? scene.background : (matched.strip.background || []),
             needsReview: Boolean(scene.needs_review),
             intExt: scene.int_ext || inferIntExt(scene.heading),
             timeOfDay: inferTimeOfDay(scene.heading, scene.time_of_day),
@@ -1026,6 +1035,7 @@ export default function App() {
                   <p><strong>Page Count:</strong> {formatPageEighths(selectedFullScriptScene.pageEighths)}</p>
                   <p><strong>Est. Time:</strong> {selectedFullScriptScene.estTimeMinutes || 0} min</p>
                   <p><strong>Cast:</strong> {(selectedFullScriptScene.cast ?? []).join(", ") || "None"}</p>
+                  <p><strong>Background:</strong> {(selectedFullScriptScene.background ?? []).join(", ") || "None"}</p>
                   <p><strong>Props:</strong> {(selectedFullScriptScene.props ?? []).join(", ") || "None"}</p>
                   <p><strong>Wardrobe:</strong> {(selectedFullScriptScene.wardrobe ?? []).join(", ") || "None"}</p>
                   <p><strong>Sets:</strong> {(selectedFullScriptScene.sets ?? []).join(", ") || "None"}</p>

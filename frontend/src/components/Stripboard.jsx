@@ -4,9 +4,10 @@ const UNSCHEDULED_DAY = "Unscheduled";
 const TIME_OPTIONS = ["DAY", "NIGHT", "DAWN", "DUSK", "MORNING", "EVENING", "SUNRISE", "SUNSET"];
 const INT_EXT_OPTIONS = ["INT", "EXT", "INT/EXT"];
 const DEFAULT_LAYOUT = {
-  fieldOrder: ["sceneNumber", "intExt", "timeOfDay", "heading", "location", "cast", "pageCount", "estTime"],
+  fieldOrder: ["sceneNumber", "intExt", "timeOfDay", "location", "cast", "background", "pageCount", "estTime"],
   rowHeight: 30,
   colorMode: "dayNight",
+  paneSplitPercent: 33,
   columnWidths: {
     sceneNumber: 90,
     intExt: 70,
@@ -14,6 +15,7 @@ const DEFAULT_LAYOUT = {
     heading: 300,
     location: 220,
     cast: 260,
+    background: 220,
     pageCount: 90,
     estTime: 90,
   },
@@ -25,6 +27,7 @@ const FIELD_DEFS = {
   heading: { label: "Heading", value: (strip) => strip.heading || "" },
   location: { label: "Location", value: (strip) => strip.location || "" },
   cast: { label: "Cast", value: (strip) => (strip.cast ?? []).join(", ") },
+  background: { label: "Background", value: (strip) => (strip.background ?? []).join(", ") },
   pageCount: { label: "Pages", value: (strip) => formatPageEighths(strip.pageEighths) },
   estTime: { label: "Est", value: (strip) => formatMinutes(strip.estTimeMinutes) },
 };
@@ -153,6 +156,7 @@ function toDraft(strip, day) {
     heading: strip?.heading ?? "",
     location: strip?.location ?? "",
     cast: uniqueValues(strip?.cast ?? []),
+    background: uniqueValues(strip?.background ?? []),
     props: uniqueValues(strip?.props ?? []),
     wardrobe: uniqueValues(strip?.wardrobe ?? []),
     sets: uniqueValues(strip?.sets ?? []),
@@ -204,6 +208,7 @@ function normalizeLayoutConfig(layoutConfig) {
     fieldOrder: fieldOrder.length ? fieldOrder : DEFAULT_LAYOUT.fieldOrder,
     rowHeight: Number.isFinite(layoutConfig?.rowHeight) ? Math.max(22, Math.min(84, layoutConfig.rowHeight)) : DEFAULT_LAYOUT.rowHeight,
     colorMode: ["dayNight", "intExt", "none"].includes(layoutConfig?.colorMode) ? layoutConfig.colorMode : DEFAULT_LAYOUT.colorMode,
+    paneSplitPercent: Number.isFinite(layoutConfig?.paneSplitPercent) ? Math.max(20, Math.min(80, layoutConfig.paneSplitPercent)) : DEFAULT_LAYOUT.paneSplitPercent,
     columnWidths: {
       ...DEFAULT_LAYOUT.columnWidths,
       ...(layoutConfig?.columnWidths && typeof layoutConfig.columnWidths === "object" ? layoutConfig.columnWidths : {}),
@@ -227,9 +232,10 @@ export function Stripboard({
   const [colorMode, setColorMode] = useState(normalizeLayoutConfig(layoutConfig).colorMode);
   const [rowHeight, setRowHeight] = useState(normalizeLayoutConfig(layoutConfig).rowHeight);
   const [fieldOrder, setFieldOrder] = useState(normalizeLayoutConfig(layoutConfig).fieldOrder);
+  const [paneSplitPercent, setPaneSplitPercent] = useState(normalizeLayoutConfig(layoutConfig).paneSplitPercent);
   const [columnWidths, setColumnWidths] = useState(normalizeLayoutConfig(layoutConfig).columnWidths);
   const [dragFieldKey, setDragFieldKey] = useState(null);
-  const [showWorkbenchPanel, setShowWorkbenchPanel] = useState(showWorkbench);
+  const [showWorkbenchPanel, setShowWorkbenchPanel] = useState(false);
   const [showUnscheduledPanel, setShowUnscheduledPanel] = useState(true);
   const [unscheduledSortKey, setUnscheduledSortKey] = useState("sceneNumber");
   const [unscheduledSortDir, setUnscheduledSortDir] = useState("asc");
@@ -237,8 +243,10 @@ export function Stripboard({
   const [draft, setDraft] = useState(toDraft(null, UNSCHEDULED_DAY));
   const [entityType, setEntityType] = useState("cast");
   const [selectedEntity, setSelectedEntity] = useState("");
-  const [chipInputs, setChipInputs] = useState({ cast: "", props: "", wardrobe: "", sets: "", location: "" });
+  const [chipInputs, setChipInputs] = useState({ cast: "", background: "", props: "", wardrobe: "", sets: "", location: "" });
   const resizeRef = useRef(null);
+  const paneResizeRef = useRef(false);
+  const splitContainerRef = useRef(null);
 
   const stripCount = useMemo(() => Object.values(stripsByDay).reduce((count, dayStrips) => count + dayStrips.length, 0), [stripsByDay]);
   const shootingDays = useMemo(() => days.filter((day) => day !== UNSCHEDULED_DAY), [days]);
@@ -248,11 +256,12 @@ export function Stripboard({
     setColorMode(normalized.colorMode);
     setRowHeight(normalized.rowHeight);
     setFieldOrder(normalized.fieldOrder);
+    setPaneSplitPercent(normalized.paneSplitPercent);
     setColumnWidths(normalized.columnWidths);
   }, [layoutConfig]);
 
   useEffect(() => {
-    setShowWorkbenchPanel(showWorkbench);
+    if (showWorkbench) setShowWorkbenchPanel(false);
   }, [showWorkbench]);
 
   const allSceneRefs = useMemo(() => {
@@ -264,7 +273,7 @@ export function Stripboard({
   }, [days, stripsByDay]);
 
   const entityIndex = useMemo(() => {
-    const maps = { cast: new Map(), location: new Map(), props: new Map(), wardrobe: new Map(), sets: new Map() };
+    const maps = { cast: new Map(), background: new Map(), location: new Map(), props: new Map(), wardrobe: new Map(), sets: new Map() };
     const push = (type, raw) => {
       const value = String(raw || "").trim();
       if (!value) return;
@@ -274,6 +283,7 @@ export function Stripboard({
 
     for (const ref of allSceneRefs) {
       for (const v of ref.strip.cast ?? []) push("cast", v);
+      for (const v of ref.strip.background ?? []) push("background", v);
       push("location", ref.strip.location);
       for (const v of ref.strip.props ?? []) push("props", v);
       for (const v of ref.strip.wardrobe ?? []) push("wardrobe", v);
@@ -298,6 +308,7 @@ export function Stripboard({
   }, [allSceneRefs, entityType, selectedEntity]);
 
   const castSuggestions = useMemo(() => Array.from(entityIndex.cast.keys()).sort((a, b) => a.localeCompare(b)), [entityIndex]);
+  const backgroundSuggestions = useMemo(() => Array.from(entityIndex.background.keys()).sort((a, b) => a.localeCompare(b)), [entityIndex]);
   const locationSuggestions = useMemo(() => Array.from(entityIndex.location.keys()).sort((a, b) => a.localeCompare(b)), [entityIndex]);
   const propsSuggestions = useMemo(() => Array.from(entityIndex.props.keys()).sort((a, b) => a.localeCompare(b)), [entityIndex]);
   const wardrobeSuggestions = useMemo(() => Array.from(entityIndex.wardrobe.keys()).sort((a, b) => a.localeCompare(b)), [entityIndex]);
@@ -383,7 +394,7 @@ export function Stripboard({
   }
 
   function getSortValue(strip, key) {
-    if (key === "cast" || key === "props" || key === "wardrobe" || key === "sets") {
+    if (key === "cast" || key === "background" || key === "props" || key === "wardrobe" || key === "sets") {
       return (strip[key] || []).join(", ").toUpperCase();
     }
     if (key === "pageEighths" || key === "estTimeMinutes" || key === "sceneNumber") {
@@ -446,6 +457,7 @@ export function Stripboard({
       heading,
       location,
       cast: uniqueValues(draft.cast),
+      background: uniqueValues(draft.background),
       props: uniqueValues(draft.props),
       wardrobe: uniqueValues(draft.wardrobe),
       sets: uniqueValues(draft.sets),
@@ -534,6 +546,7 @@ export function Stripboard({
       fieldOrder,
       rowHeight,
       colorMode,
+      paneSplitPercent,
       columnWidths,
     });
   }
@@ -557,20 +570,29 @@ export function Stripboard({
 
   useEffect(() => {
     function onMouseMove(event) {
-      if (!resizeRef.current) return;
-      const { fieldKey, startX, startWidth } = resizeRef.current;
-      const delta = event.clientX - startX;
-      const nextWidth = Math.max(60, Math.min(700, startWidth + delta));
-      setColumnWidths((prev) => ({ ...prev, [fieldKey]: nextWidth }));
+      if (resizeRef.current) {
+        const { fieldKey, startX, startWidth } = resizeRef.current;
+        const delta = event.clientX - startX;
+        const nextWidth = Math.max(30, Math.min(700, startWidth + delta));
+        setColumnWidths((prev) => ({ ...prev, [fieldKey]: nextWidth }));
+        return;
+      }
+      if (!paneResizeRef.current || !splitContainerRef.current || !showUnscheduledPanel) return;
+      const bounds = splitContainerRef.current.getBoundingClientRect();
+      if (bounds.width <= 0) return;
+      const percent = ((event.clientX - bounds.left) / bounds.width) * 100;
+      setPaneSplitPercent(Math.max(20, Math.min(80, percent)));
     }
 
     function onMouseUp() {
-      if (!resizeRef.current) return;
+      if (!resizeRef.current && !paneResizeRef.current) return;
       resizeRef.current = null;
+      paneResizeRef.current = false;
       onSaveLayoutConfig?.({
         fieldOrder,
         rowHeight,
         colorMode,
+        paneSplitPercent,
         columnWidths,
       });
     }
@@ -581,7 +603,7 @@ export function Stripboard({
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseup", onMouseUp);
     };
-  }, [colorMode, columnWidths, fieldOrder, onSaveLayoutConfig, rowHeight]);
+  }, [colorMode, columnWidths, fieldOrder, onSaveLayoutConfig, paneSplitPercent, rowHeight, showUnscheduledPanel]);
 
   function onFieldDrop(targetField) {
     if (!dragFieldKey || dragFieldKey === targetField) return;
@@ -610,6 +632,19 @@ export function Stripboard({
     });
   }, [shootingDays, stripsByDay]);
 
+  const unscheduledFieldOrder = useMemo(
+    () => fieldOrder.filter((fieldKey) => fieldKey !== "heading"),
+    [fieldOrder]
+  );
+  const unscheduledTableWidth = useMemo(
+    () => Math.max(240, unscheduledFieldOrder.reduce((total, fieldKey) => total + Number(columnWidths[fieldKey] || DEFAULT_LAYOUT.columnWidths[fieldKey] || 120), 0)),
+    [columnWidths, unscheduledFieldOrder]
+  );
+  const scheduledTableWidth = useMemo(
+    () => Math.max(360, fieldOrder.reduce((total, fieldKey) => total + Number(columnWidths[fieldKey] || DEFAULT_LAYOUT.columnWidths[fieldKey] || 120), 0)),
+    [columnWidths, fieldOrder]
+  );
+
   const unscheduledRows = useMemo(() => {
     const rows = [...(stripsByDay[UNSCHEDULED_DAY] ?? [])];
     rows.sort((a, b) => {
@@ -622,6 +657,25 @@ export function Stripboard({
     });
     return rows;
   }, [stripsByDay, unscheduledSortKey, unscheduledSortDir]);
+
+  function deleteDayBreakAfter(day) {
+    const breakIndex = shootingDays.indexOf(day);
+    if (breakIndex < 0 || breakIndex >= shootingDays.length - 1) return;
+    const nextDay = shootingDays[breakIndex + 1];
+
+    setDays((prev) => prev.filter((item) => item !== nextDay));
+    setStripsByDay((prev) => {
+      const next = Object.fromEntries(Object.entries(prev).map(([key, strips]) => [key, [...strips]]));
+      next[day] = [...(next[day] || []), ...(next[nextDay] || [])];
+      delete next[nextDay];
+      return next;
+    });
+
+    if (editorTarget?.day === nextDay) {
+      setEditorTarget((prev) => (prev ? { ...prev, day } : prev));
+      setDraft((prev) => ({ ...prev, day, sourceDay: day }));
+    }
+  }
 
   return (
     <div>
@@ -638,7 +692,7 @@ export function Stripboard({
         <button type="button" onClick={insertDayBreakAfterActive} disabled={!editorTarget}>Add Day Break After Active Scene</button>
         <button type="button" onClick={startFirstShootDayFromUnscheduled} disabled={(stripsByDay[UNSCHEDULED_DAY] ?? []).length === 0}>Start Schedule From Unscheduled</button>
         <button type="button" onClick={() => setShowUnscheduledPanel((prev) => !prev)}>
-          {showUnscheduledPanel ? "Hide Unscheduled" : "Show Unscheduled"}
+          {showUnscheduledPanel ? "Hide Boneyard" : "Show Boneyard"}
         </button>
         {onReturnToStripView ? <button type="button" onClick={onReturnToStripView}>Return to Strip View</button> : null}
         {showWorkbench ? (
@@ -730,6 +784,7 @@ export function Stripboard({
 
             <div className="chip-grid">
               <ChipListEditor title="Cast" values={draft.cast} suggestions={castSuggestions} inputValue={chipInputs.cast} onInputChange={(value) => setChipInputs((prev) => ({ ...prev, cast: value }))} onAdd={(value) => addChip("cast", value)} onRemove={(value) => removeChip("cast", value)} placeholder="Add cast" />
+              <ChipListEditor title="Background" values={draft.background} suggestions={backgroundSuggestions} inputValue={chipInputs.background} onInputChange={(value) => setChipInputs((prev) => ({ ...prev, background: value }))} onAdd={(value) => addChip("background", value)} onRemove={(value) => removeChip("background", value)} placeholder="Add background" />
               <ChipListEditor title="Props" values={draft.props} suggestions={propsSuggestions} inputValue={chipInputs.props} onInputChange={(value) => setChipInputs((prev) => ({ ...prev, props: value }))} onAdd={(value) => addChip("props", value)} onRemove={(value) => removeChip("props", value)} placeholder="Add prop" />
               <ChipListEditor title="Wardrobe" values={draft.wardrobe} suggestions={wardrobeSuggestions} inputValue={chipInputs.wardrobe} onInputChange={(value) => setChipInputs((prev) => ({ ...prev, wardrobe: value }))} onAdd={(value) => addChip("wardrobe", value)} onRemove={(value) => removeChip("wardrobe", value)} placeholder="Add wardrobe" />
               <ChipListEditor title="Sets" values={draft.sets} suggestions={setsSuggestions} inputValue={chipInputs.sets} onInputChange={(value) => setChipInputs((prev) => ({ ...prev, sets: value }))} onAdd={(value) => addChip("sets", value)} onRemove={(value) => removeChip("sets", value)} placeholder="Add set" />
@@ -761,6 +816,7 @@ export function Stripboard({
               Browse
               <select value={entityType} onChange={(event) => setEntityType(event.target.value)}>
                 <option value="cast">Cast</option>
+                <option value="background">Background</option>
                 <option value="location">Location</option>
                 <option value="props">Props</option>
                 <option value="wardrobe">Wardrobe</option>
@@ -827,20 +883,25 @@ export function Stripboard({
 
       {reportView === "stripboard" ? (
         <div className="stripboard-layout">
-          <div className={showUnscheduledPanel ? "strip-split-layout" : "strip-split-layout unscheduled-hidden"}>
+          <div
+            ref={splitContainerRef}
+            className={showUnscheduledPanel ? "strip-split-layout" : "strip-split-layout unscheduled-hidden"}
+            style={showUnscheduledPanel ? { gridTemplateColumns: `${paneSplitPercent}% 8px ${100 - paneSplitPercent}%` } : undefined}
+          >
             {showUnscheduledPanel ? (
               <section className="scene-table-wrap unscheduled-pane">
-                <table className="scene-table">
+                <div className="pane-header">Boneyard</div>
+                <table className="scene-table" style={{ width: `${unscheduledTableWidth}px`, minWidth: `${unscheduledTableWidth}px` }}>
                   <thead>
                     <tr>
-                      {fieldOrder.map((fieldKey) => (
+                      {unscheduledFieldOrder.map((fieldKey) => (
                         <th
                           key={`uns-h-${fieldKey}`}
                           className={unscheduledSortKey === fieldKey ? "sortable-header is-active" : "sortable-header"}
                           style={{ width: `${columnWidths[fieldKey] || DEFAULT_LAYOUT.columnWidths[fieldKey] || 120}px` }}
                           onClick={() => onHeaderClickSort(fieldKey)}
                         >
-                          <span>{FIELD_DEFS[fieldKey]?.label || fieldKey}</span>
+                          <span>{fieldKey === "sceneNumber" ? "SC" : (FIELD_DEFS[fieldKey]?.label || fieldKey)}</span>
                           {unscheduledSortKey === fieldKey ? <span>{unscheduledSortDir === "asc" ? "▲" : "▼"}</span> : null}
                           <span className="col-resize-handle" onMouseDown={(event) => beginResize(fieldKey, event)} />
                         </th>
@@ -857,7 +918,7 @@ export function Stripboard({
                         setDraggedStrip(null);
                       }}
                     >
-                      <td colSpan={fieldOrder.length}>Unscheduled ({unscheduledRows.length})</td>
+                      <td colSpan={unscheduledFieldOrder.length}>Boneyard ({unscheduledRows.length})</td>
                     </tr>
                     {unscheduledRows.map((strip) => {
                       const isActive = editorTarget?.id === strip.id;
@@ -877,7 +938,7 @@ export function Stripboard({
                             setDraggedStrip(null);
                           }}
                         >
-                          {fieldOrder.map((fieldKey) => (
+                          {unscheduledFieldOrder.map((fieldKey) => (
                             <td key={`uns-${strip.id}-${fieldKey}`} style={{ width: `${columnWidths[fieldKey] || DEFAULT_LAYOUT.columnWidths[fieldKey] || 120}px` }}>
                               {FIELD_DEFS[fieldKey]?.value(strip) || ""}
                             </td>
@@ -889,9 +950,22 @@ export function Stripboard({
                 </table>
               </section>
             ) : null}
+            {showUnscheduledPanel ? (
+              <div
+                className="pane-splitter"
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="Resize boneyard and schedule panes"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  paneResizeRef.current = true;
+                }}
+              />
+            ) : null}
 
             <section className="scene-table-wrap scheduled-pane">
-              <table className="scene-table">
+              <div className="pane-header">Schedule</div>
+              <table className="scene-table" style={{ width: `${scheduledTableWidth}px`, minWidth: `${scheduledTableWidth}px` }}>
                 <thead>
                   <tr>
                     {fieldOrder.map((fieldKey) => (
@@ -941,7 +1015,22 @@ export function Stripboard({
                         }}
                       >
                         <td colSpan={fieldOrder.length}>
-                          End of Day #{block.dayIndex} - {block.day} - {formatPageEighths(block.pageTotal)} pages - {formatMinutes(block.timeTotal)} est.
+                          <div className="day-break-content">
+                            <span>
+                              End of Day #{block.dayIndex} - {block.day} - {formatPageEighths(block.pageTotal)} pages - {formatMinutes(block.timeTotal)} est.
+                            </span>
+                            <button
+                              type="button"
+                              className="day-break-delete"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                deleteDayBreakAfter(block.day);
+                              }}
+                              disabled={block.dayIndex >= shootingDays.length}
+                            >
+                              Delete Day Break
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     </Fragment>

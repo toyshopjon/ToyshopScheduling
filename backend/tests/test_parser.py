@@ -90,6 +90,26 @@ The crowd parts as RIPLEY walks through the rain.
     assert "RIPLEY" in scenes[1].cast
 
 
+def test_dialogue_only_mentions_do_not_add_cast() -> None:
+    parser = ScriptParser()
+    text = """
+INT. APARTMENT - NIGHT
+RIPLEY
+I heard DALLAS was here.
+
+INT. HALLWAY - NIGHT
+RIPLEY
+DALLAS should meet us downstairs.
+"""
+    scenes = parser._split_into_scenes(text)
+
+    assert len(scenes) == 2
+    assert "RIPLEY" in scenes[0].cast
+    assert "DALLAS" not in scenes[0].cast
+    assert "RIPLEY" in scenes[1].cast
+    assert "DALLAS" not in scenes[1].cast
+
+
 def test_all_caps_int_ext_line_starts_new_scene_even_without_time_suffix() -> None:
     parser = ScriptParser()
     text = """
@@ -156,3 +176,32 @@ Watch the door.
 
     assert len(scenes) == 1
     assert scenes[0].location == "NEW YORK BAR"
+
+
+def test_contraction_fragment_i_apostrophe_is_not_added_as_cast() -> None:
+    parser = ScriptParser()
+    text = """
+INT. BAR - NIGHT
+I'
+M TRYING TO HELP.
+BAR-GOER:
+Take a breath.
+"""
+    scenes = parser._split_into_scenes(text)
+
+    assert len(scenes) == 1
+    assert "I'" not in scenes[0].cast
+    assert "BAR-GOER" in scenes[0].cast
+
+
+def test_parenthetical_descriptors_do_not_become_cast() -> None:
+    parser = ScriptParser()
+    text = """
+INT. HOUSE - DAY
+JOE (MAN, 60S) stares at the wall.
+"""
+    scenes = parser._split_into_scenes(text)
+
+    assert len(scenes) == 1
+    assert "MAN" not in scenes[0].cast
+    assert "JOE" in scenes[0].cast

@@ -32,6 +32,7 @@ class ScenePayload(BaseModel):
     page_eighths: int = 1
     est_time_minutes: int = 0
     cast_csv: str = ""
+    background_csv: str = ""
     props_csv: str = ""
     wardrobe_csv: str = ""
     sets_csv: str = ""
@@ -69,6 +70,7 @@ class AliasPayload(BaseModel):
     alias: str
     canonical: str
     source: str = "manual"
+    ignore: bool = False
 
 
 @router.post("/scripts/parse")
@@ -157,10 +159,11 @@ def get_aliases(element_type: str | None = None) -> dict:
 @router.post("/dev/review/aliases")
 def save_alias(payload: AliasPayload) -> dict[str, Any]:
     try:
+        canonical = "__IGNORE__" if payload.ignore else payload.canonical
         return upsert_alias(
             payload.element_type,
             payload.alias,
-            payload.canonical,
+            canonical,
             payload.source,
         )
     except ValueError as error:

@@ -38,6 +38,7 @@ def init_db() -> None:
               page_eighths INTEGER DEFAULT 1,
               est_time_minutes INTEGER DEFAULT 0,
               cast_csv TEXT DEFAULT '',
+              background_csv TEXT DEFAULT '',
               props_csv TEXT DEFAULT '',
               wardrobe_csv TEXT DEFAULT '',
               sets_csv TEXT DEFAULT '',
@@ -81,6 +82,7 @@ def init_db() -> None:
             """
         )
         _ensure_column(conn, "scenes", "sets_csv", "TEXT DEFAULT ''")
+        _ensure_column(conn, "scenes", "background_csv", "TEXT DEFAULT ''")
         _ensure_column(conn, "scenes", "est_time_minutes", "INTEGER DEFAULT 0")
         _ensure_column(conn, "review_feedback", "predicted_sets_csv", "TEXT DEFAULT ''")
         _ensure_column(conn, "review_feedback", "corrected_sets_csv", "TEXT DEFAULT ''")
@@ -128,6 +130,7 @@ def seed_demo_data() -> dict:
                 3,
                 45,
                 "RIPLEY,DALLAS,LAMBERT",
+                "BAR PATRONS",
                 "MOTION TRACKER,TERMINAL",
                 "FLIGHT SUIT",
                 "NOSTROMO BRIDGE",
@@ -145,6 +148,7 @@ def seed_demo_data() -> dict:
                 5,
                 70,
                 "RIPLEY,KANE",
+                "EXTRA CREW",
                 "ROVER,HELMET",
                 "SPACESUIT",
                 "PLANET SURFACE",
@@ -158,8 +162,8 @@ def seed_demo_data() -> dict:
             """
             INSERT INTO scenes(
               schedule_id, scene_number, heading, location, int_ext, time_of_day,
-              page_eighths, est_time_minutes, cast_csv, props_csv, wardrobe_csv, sets_csv, notes, script_text, source_order
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              page_eighths, est_time_minutes, cast_csv, background_csv, props_csv, wardrobe_csv, sets_csv, notes, script_text, source_order
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             demo_scenes,
         )
@@ -195,7 +199,7 @@ def list_scenes(schedule_id: int) -> list[dict]:
         rows = conn.execute(
             """
             SELECT id, schedule_id, scene_number, heading, location, int_ext, time_of_day,
-                   page_eighths, est_time_minutes, cast_csv, props_csv, wardrobe_csv, sets_csv, notes, script_text, source_order
+                   page_eighths, est_time_minutes, cast_csv, background_csv, props_csv, wardrobe_csv, sets_csv, notes, script_text, source_order
             FROM scenes
             WHERE schedule_id = ?
             ORDER BY source_order, scene_number, id
@@ -229,6 +233,7 @@ def replace_scenes(schedule_id: int, scenes: list[dict]) -> dict:
                     int(scene.get("page_eighths", 1)),
                     int(scene.get("est_time_minutes", 0)),
                     scene.get("cast_csv", ""),
+                    scene.get("background_csv", ""),
                     scene.get("props_csv", ""),
                     scene.get("wardrobe_csv", ""),
                     scene.get("sets_csv", ""),
@@ -242,8 +247,8 @@ def replace_scenes(schedule_id: int, scenes: list[dict]) -> dict:
             """
             INSERT INTO scenes(
               schedule_id, scene_number, heading, location, int_ext, time_of_day,
-              page_eighths, est_time_minutes, cast_csv, props_csv, wardrobe_csv, sets_csv, notes, script_text, source_order
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              page_eighths, est_time_minutes, cast_csv, background_csv, props_csv, wardrobe_csv, sets_csv, notes, script_text, source_order
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             payload,
         )
