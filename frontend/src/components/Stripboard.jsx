@@ -524,7 +524,7 @@ export function Stripboard({
   }
 
   function getFieldValue(fieldKey, strip) {
-    if (fieldKey === "cast" && castNumbersLocked) {
+    if (fieldKey === "cast") {
       const values = (strip.cast || [])
         .map((name) => castNumberLookup.get(normalizeName(name)))
         .filter((value) => Number.isFinite(value))
@@ -771,13 +771,17 @@ export function Stripboard({
     () => fieldOrder.filter((fieldKey) => fieldKey !== "heading"),
     [fieldOrder]
   );
+  const scheduledFieldOrder = useMemo(
+    () => fieldOrder.filter((fieldKey) => fieldKey !== "heading"),
+    [fieldOrder]
+  );
   const unscheduledTableWidth = useMemo(
     () => Math.max(240, unscheduledFieldOrder.reduce((total, fieldKey) => total + Number(columnWidths[fieldKey] || DEFAULT_LAYOUT.columnWidths[fieldKey] || 120), 0)),
     [columnWidths, unscheduledFieldOrder]
   );
   const scheduledTableWidth = useMemo(
-    () => Math.max(360, fieldOrder.reduce((total, fieldKey) => total + Number(columnWidths[fieldKey] || DEFAULT_LAYOUT.columnWidths[fieldKey] || 120), 0)),
-    [columnWidths, fieldOrder]
+    () => Math.max(360, scheduledFieldOrder.reduce((total, fieldKey) => total + Number(columnWidths[fieldKey] || DEFAULT_LAYOUT.columnWidths[fieldKey] || 120), 0)),
+    [columnWidths, scheduledFieldOrder]
   );
 
   const unscheduledRows = useMemo(() => {
@@ -1142,7 +1146,7 @@ export function Stripboard({
           <div
             ref={splitContainerRef}
             className={showUnscheduledPanel ? "strip-split-layout" : "strip-split-layout unscheduled-hidden"}
-            style={showUnscheduledPanel ? { gridTemplateColumns: `${paneSplitPercent}% 8px ${100 - paneSplitPercent}%` } : undefined}
+            style={showUnscheduledPanel ? { gridTemplateColumns: `calc(${paneSplitPercent}% - 4px) 8px calc(${100 - paneSplitPercent}% - 4px)` } : undefined}
           >
             {showUnscheduledPanel ? (
               <section className="scene-table-wrap unscheduled-pane">
@@ -1224,7 +1228,7 @@ export function Stripboard({
               <table className="scene-table" style={{ width: `${scheduledTableWidth}px`, minWidth: `${scheduledTableWidth}px` }}>
                 <thead>
                   <tr>
-                    {fieldOrder.map((fieldKey) => (
+                    {scheduledFieldOrder.map((fieldKey) => (
                       <th key={`sched-h-${fieldKey}`} style={{ width: `${columnWidths[fieldKey] || DEFAULT_LAYOUT.columnWidths[fieldKey] || 120}px` }}>
                         {FIELD_DEFS[fieldKey]?.label || fieldKey}
                       </th>
@@ -1252,7 +1256,7 @@ export function Stripboard({
                               setDraggedStrip(null);
                             }}
                           >
-                            {fieldOrder.map((fieldKey) => (
+                            {scheduledFieldOrder.map((fieldKey) => (
                               <td key={`sched-${strip.id}-${fieldKey}`} style={{ width: `${columnWidths[fieldKey] || DEFAULT_LAYOUT.columnWidths[fieldKey] || 120}px` }}>
                                 {getFieldValue(fieldKey, strip)}
                               </td>
@@ -1270,7 +1274,7 @@ export function Stripboard({
                           setDraggedStrip(null);
                         }}
                       >
-                        <td colSpan={fieldOrder.length}>
+                        <td colSpan={scheduledFieldOrder.length}>
                           <div className="day-break-content">
                             <span>
                               End of Day #{block.dayIndex} - {block.day} - {formatPageEighths(block.pageTotal)} pages - {formatMinutes(block.timeTotal)} est.

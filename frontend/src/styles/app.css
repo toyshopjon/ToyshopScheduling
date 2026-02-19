@@ -1,17 +1,69 @@
+@import url("https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap");
+
 :root {
-  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-  color: #121212;
-  background: #f7f8fa;
+  --ts-ink: #0c1320;
+  --ts-ink-soft: #263042;
+  --ts-paper: #f6f2e9;
+  --ts-panel: #fffdfa;
+  --ts-accent: #2a56d8;
+  --ts-accent-soft: #e8eeff;
+  --ts-border: #cfd6e3;
+  --ts-shadow: 0 8px 22px rgba(10, 17, 31, 0.08);
+  font-family: "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
+  color: var(--ts-ink);
+  background: var(--ts-paper);
 }
 
 body {
   margin: 0;
+  background:
+    radial-gradient(900px 500px at 10% -10%, rgba(42, 86, 216, 0.09), transparent 55%),
+    radial-gradient(1000px 500px at 100% -15%, rgba(42, 86, 216, 0.08), transparent 52%),
+    var(--ts-paper);
+}
+
+h1,
+h2,
+h3,
+h4,
+summary,
+.pane-header,
+.chip-editor-header {
+  font-family: "Barlow Condensed", "IBM Plex Sans", sans-serif;
+  letter-spacing: 0.015em;
+}
+
+button {
+  border: 1px solid var(--ts-border);
+  background: #ffffff;
+  color: var(--ts-ink);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font: inherit;
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: #9eb0d6;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+input,
+select,
+textarea {
+  border-color: var(--ts-border);
 }
 
 .app-shell {
-  max-width: 1480px;
-  margin: 0 auto;
-  padding: 24px;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 20px clamp(14px, 2.2vw, 32px);
+  box-sizing: border-box;
 }
 
 .hero {
@@ -20,14 +72,18 @@ body {
 
 .hero h1 {
   margin: 0;
+  font-size: clamp(2rem, 3.6vw, 3rem);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
 }
 
 .panel {
-  background: #fff;
-  border: 1px solid #d9e0e8;
+  background: var(--ts-panel);
+  border: 1px solid var(--ts-border);
   border-radius: 12px;
   padding: 16px;
   margin-bottom: 16px;
+  box-shadow: var(--ts-shadow);
 }
 
 .schedule-switcher-panel label {
@@ -50,10 +106,12 @@ body {
 .menu-group > summary {
   list-style: none;
   cursor: pointer;
-  border: 1px solid #cfd8e8;
+  border: 1px solid #2e3d5a;
   border-radius: 6px;
   padding: 6px 10px;
-  background: #f8fbff;
+  background: #121b2d;
+  color: #f9fbff;
+  text-transform: uppercase;
 }
 
 .menu-group > summary::-webkit-details-marker {
@@ -68,10 +126,10 @@ body {
   display: grid;
   gap: 6px;
   padding: 8px;
-  border: 1px solid #cfd8e8;
+  border: 1px solid var(--ts-border);
   border-radius: 8px;
   background: #ffffff;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--ts-shadow);
 }
 
 .menu-content label {
@@ -178,7 +236,7 @@ body {
 .strip-split-layout {
   display: grid;
   grid-template-columns: 33% 8px 67%;
-  gap: 10px;
+  gap: 0;
   align-items: start;
 }
 
@@ -222,8 +280,9 @@ body {
   position: sticky;
   top: 0;
   z-index: 3;
-  background: #f2f5fb;
-  border-bottom: 1px solid #d8e0ee;
+  background: #131d31;
+  color: #f8faff;
+  border-bottom: 1px solid #33415f;
   padding: 8px 10px;
   font-size: 13px;
   font-weight: 700;
@@ -251,7 +310,7 @@ body {
   position: sticky;
   top: 0;
   z-index: 1;
-  background: #f7f9fc;
+  background: #f2f6ff;
   text-align: left;
   user-select: none;
 }
@@ -262,7 +321,7 @@ body {
 }
 
 .sortable-header.is-active {
-  background: #eaf0ff;
+  background: #dce7ff;
 }
 
 .sortable-header span:first-child {
@@ -288,7 +347,7 @@ body {
 }
 
 .day-break-row td {
-  background: #101522;
+  background: #121b2d;
   color: #ffffff;
   font-weight: 700;
   letter-spacing: 0.01em;
@@ -302,8 +361,8 @@ body {
 }
 
 .day-break-delete {
-  border: 1px solid #4f5b75;
-  background: #1f2b45;
+  border: 1px solid #5f7096;
+  background: #213358;
   color: #ffffff;
   border-radius: 6px;
   padding: 4px 8px;
@@ -342,9 +401,9 @@ body {
 }
 
 .layout-pill {
-  border: 1px solid #a9b8d1;
-  background: #eef3ff;
-  color: #1e2f4c;
+  border: 1px solid #9ab0dd;
+  background: var(--ts-accent-soft);
+  color: #213762;
   border-radius: 999px;
   padding: 4px 10px;
   cursor: grab;
@@ -506,8 +565,8 @@ body {
 }
 
 .scene-editor {
-  background: #f7f9fc;
-  border: 1px solid #d3dbe6;
+  background: #f9fbff;
+  border: 1px solid var(--ts-border);
   border-radius: 8px;
   padding: 10px;
   margin-top: 10px;
@@ -621,9 +680,9 @@ body {
 }
 
 .chip {
-  border: 1px solid #9fb1cf;
-  background: #eef3ff;
-  color: #1a2d4e;
+  border: 1px solid #8fa6d3;
+  background: #ecf2ff;
+  color: #16284d;
   border-radius: 999px;
   padding: 4px 8px;
   font-size: 12px;
