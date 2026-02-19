@@ -1,7 +1,8 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const TIME_OPTIONS = ["DAY", "NIGHT", "DAWN", "DUSK", "MORNING", "EVENING", "SUNRISE", "SUNSET"];
 const INT_EXT_OPTIONS = ["INT", "EXT", "INT/EXT"];
+const ELEMENT_TYPES = ["cast", "background", "location", "props", "wardrobe", "sets"];
 
 function uniqueValues(values) {
   const seen = new Set();
@@ -76,6 +77,94 @@ function deriveHeadingFromSelectedText(selectedText, fallbackHeading) {
   return fallbackHeading;
 }
 
+function escapeRegExp(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function normalizeSelection(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function sceneElementTokens(scene) {
+  const suppressed = {
+    cast: new Set((scene?.suppressed?.cast || []).map((item) => normalizeName(item))),
+    background: new Set((scene?.suppressed?.background || []).map((item) => normalizeName(item))),
+    location: new Set((scene?.suppressed?.location || []).map((item) => normalizeName(item))),
+    props: new Set((scene?.suppressed?.props || []).map((item) => normalizeName(item))),
+    wardrobe: new Set((scene?.suppressed?.wardrobe || []).map((item) => normalizeName(item))),
+    sets: new Set((scene?.suppressed?.sets || []).map((item) => normalizeName(item))),
+  };
+  const filterSuppressed = (type, items) =>
+    uniqueValues(items).filter((item) => !suppressed[type].has(normalizeName(item)));
+
+  const byType = {
+    cast: filterSuppressed("cast", [...(scene?.predicted?.cast || []), ...(scene?.corrected?.cast || [])]),
+    background: filterSuppressed("background", [...(scene?.predicted?.background || []), ...(scene?.corrected?.background || [])]),
+    props: filterSuppressed("props", [...(scene?.predicted?.props || []), ...(scene?.corrected?.props || [])]),
+    wardrobe: filterSuppressed("wardrobe", [...(scene?.predicted?.wardrobe || []), ...(scene?.corrected?.wardrobe || [])]),
+    sets: filterSuppressed("sets", [...(scene?.predicted?.sets || []), ...(scene?.corrected?.sets || [])]),
+    location: filterSuppressed("location", [scene?.predicted?.location || "", scene?.corrected?.location || ""]),
+  };
+  return byType;
+}
+
+function buildLineSegments(text, tokenMap) {
+  const lineText = String(text || "");
+  if (!lineText) return [{ kind: "plain", text: "" }];
+
+  const matches = [];
+  for (const type of ELEMENT_TYPES) {
+    const tokens = (tokenMap[type] || [])
+      .map((item) => String(item || "").trim())
+      .filter(Boolean)
+      .sort((a, b) => b.length - a.length);
+
+    for (const token of tokens) {
+      const pattern = new RegExp(`(?<![A-Z0-9])${escapeRegExp(token)}(?![A-Z0-9])`, "gi");
+      let hit = pattern.exec(lineText);
+      while (hit) {
+        matches.push({
+          type,
+          token,
+          start: hit.index,
+          end: hit.index + hit[0].length,
+          text: hit[0],
+          len: hit[0].length,
+        });
+        hit = pattern.exec(lineText);
+      }
+    }
+  }
+
+  if (!matches.length) return [{ kind: "plain", text: lineText }];
+
+  matches.sort((a, b) => (a.start - b.start) || (b.len - a.len));
+  const accepted = [];
+  let cursor = 0;
+  for (const candidate of matches) {
+    if (candidate.start < cursor) continue;
+    accepted.push(candidate);
+    cursor = candidate.end;
+  }
+
+  if (!accepted.length) return [{ kind: "plain", text: lineText }];
+
+  const segments = [];
+  let index = 0;
+  for (const match of accepted) {
+    if (match.start > index) segments.push({ kind: "plain", text: lineText.slice(index, match.start) });
+    segments.push({
+      kind: "element",
+      text: lineText.slice(match.start, match.end),
+      type: match.type,
+      token: match.token,
+    });
+    index = match.end;
+  }
+  if (index < lineText.length) segments.push({ kind: "plain", text: lineText.slice(index) });
+  return segments;
+}
+
 function asReviewScene(scene, index) {
   const predictedCast = uniqueValues(Array.isArray(scene.cast) ? scene.cast : []);
   return {
@@ -108,6 +197,14 @@ function asReviewScene(scene, index) {
     split_parent_scene_number: 0,
     split_parent_heading: "",
     split_selected_text: "",
+    suppressed: {
+      cast: [],
+      background: [],
+      location: [],
+      props: [],
+      wardrobe: [],
+      sets: [],
+    },
   };
 }
 
@@ -142,14 +239,15 @@ function ChipListEditor({ title, values, onAdd, onRemove, suggestions = [], inpu
   );
 }
 
-export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeedback, onSaveAlias }) {
+export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeedback }) {
   const [scenes, setScenes] = useState(() => parsedScenes.map((scene, index) => asReviewScene(scene, index)));
   const [index, setIndex] = useState(0);
   const [splitError, setSplitError] = useState("");
-  const [aliasForm, setAliasForm] = useState({ elementType: "cast", alias: "", canonical: "", ignore: false });
-  const [aliasStatus, setAliasStatus] = useState("");
   const [inputs, setInputs] = useState({ cast: "", background: "", location: "", props: "", wardrobe: "", sets: "" });
   const scriptTextRef = useRef(null);
+  const lineMapperRef = useRef(null);
+  const [selectionPreview, setSelectionPreview] = useState("");
+  const [contextMenu, setContextMenu] = useState({ open: false, x: 0, y: 0, text: "" });
 
   const current = scenes[index];
 
@@ -214,6 +312,7 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
     if (!predicted && !corrected) return false;
     return predicted.toUpperCase() !== corrected.toUpperCase();
   }, [current.corrected.location, current.predicted.location]);
+  const parserElementMap = useMemo(() => sceneElementTokens(current), [current]);
 
   function updateCurrent(updater) {
     setScenes((prev) => {
@@ -237,22 +336,62 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
   function addToken(field, value) {
     const candidate = String(value || "").trim();
     if (!candidate) return;
+    const target = normalizeName(candidate);
     updateCurrent((scene) => ({
       ...scene,
       corrected: {
         ...scene.corrected,
         [field]: uniqueValues([...(scene.corrected[field] || []), candidate]),
       },
+      suppressed: {
+        ...scene.suppressed,
+        [field]: (scene.suppressed?.[field] || []).filter((item) => normalizeName(item) !== target),
+      },
     }));
     setInputs((prev) => ({ ...prev, [field]: "" }));
   }
 
   function removeToken(field, value) {
+    const target = String(value || "").trim().toUpperCase();
     updateCurrent((scene) => ({
       ...scene,
       corrected: {
         ...scene.corrected,
-        [field]: (scene.corrected[field] || []).filter((item) => item !== value),
+        [field]: (scene.corrected[field] || []).filter((item) => String(item || "").trim().toUpperCase() !== target),
+      },
+    }));
+  }
+
+  function removeElementValue(type, value) {
+    if (type === "location") {
+      const target = String(value || "").trim().toUpperCase();
+      if (!target) return;
+      updateCurrent((scene) => {
+        const currentLocation = String(scene.corrected.location || "").trim().toUpperCase();
+        return {
+          ...scene,
+          corrected: {
+            ...scene.corrected,
+            location: currentLocation === target ? "" : scene.corrected.location,
+          },
+          suppressed: {
+            ...scene.suppressed,
+            location: uniqueValues([...(scene.suppressed?.location || []), value]),
+          },
+        };
+      });
+      return;
+    }
+    const target = normalizeName(value);
+    updateCurrent((scene) => ({
+      ...scene,
+      corrected: {
+        ...scene.corrected,
+        [type]: (scene.corrected[type] || []).filter((item) => normalizeName(item) !== target),
+      },
+      suppressed: {
+        ...scene.suppressed,
+        [type]: uniqueValues([...(scene.suppressed?.[type] || []), value]),
       },
     }));
   }
@@ -260,11 +399,16 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
   function addLocation(value) {
     const candidate = String(value || "").trim();
     if (!candidate) return;
+    const target = normalizeName(candidate);
     updateCurrent((scene) => ({
       ...scene,
       corrected: {
         ...scene.corrected,
         location: candidate.replace(/^[\s.\-:;]+/, ""),
+      },
+      suppressed: {
+        ...scene.suppressed,
+        location: (scene.suppressed?.location || []).filter((item) => normalizeName(item) !== target),
       },
     }));
     setInputs((prev) => ({ ...prev, location: "" }));
@@ -404,11 +548,13 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
     await saveFeedbackFor(scenes[index]);
     const nextIndex = Math.min(scenes.length - 1, index + 1);
     applyAdaptiveCarryForward(nextIndex);
+    clearSelectionAndContext();
     setIndex(nextIndex);
   }
 
   async function goPrev() {
     await saveFeedbackFor(scenes[index]);
+    clearSelectionAndContext();
     setIndex((prev) => Math.max(0, prev - 1));
   }
 
@@ -433,30 +579,62 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
     );
   }
 
-  async function saveAliasCorrection() {
-    const alias = aliasForm.alias.trim();
-    const canonical = aliasForm.canonical.trim();
-    if (!alias || (!aliasForm.ignore && !canonical)) {
-      setAliasStatus(aliasForm.ignore ? "Enter Alias value." : "Enter both Alias and Canonical values.");
-      return;
+  function getSelectionFromLineMapper() {
+    const root = lineMapperRef.current;
+    const selection = window.getSelection?.();
+    if (!root || !selection || selection.rangeCount === 0) return "";
+    const range = selection.getRangeAt(0);
+    if (!root.contains(range.commonAncestorContainer)) return "";
+    return normalizeSelection(selection.toString());
+  }
+
+  function captureSelectionPreview() {
+    setSelectionPreview(getSelectionFromLineMapper());
+  }
+
+  function openElementTypeMenu(event, explicitText = "") {
+    const candidate = normalizeSelection(explicitText || getSelectionFromLineMapper());
+    if (!candidate) return;
+    event.preventDefault();
+    setSelectionPreview(candidate);
+    setContextMenu({ open: true, x: event.clientX, y: event.clientY, text: candidate });
+  }
+
+  function addFromContextMenu(type) {
+    const candidate = normalizeSelection(contextMenu.text || selectionPreview);
+    if (!candidate) return;
+    if (type === "location") {
+      addLocation(candidate);
+    } else {
+      addToken(type, candidate);
     }
-    try {
-      await onSaveAlias?.({
-        element_type: aliasForm.elementType,
-        alias,
-        canonical,
-        ignore: Boolean(aliasForm.ignore),
-        source: "manual",
-      });
-      setAliasStatus(
-        aliasForm.ignore
-          ? `Saved ignore rule: ${alias.toUpperCase()}`
-          : `Saved correction: ${alias.toUpperCase()} -> ${canonical}`
-      );
-      setAliasForm((prev) => ({ ...prev, alias: "", canonical: prev.ignore ? "" : prev.canonical }));
-    } catch {
-      setAliasStatus("Failed to save correction.");
+    window.getSelection?.().removeAllRanges();
+    setSelectionPreview("");
+    setContextMenu({ open: false, x: 0, y: 0, text: "" });
+  }
+
+  function closeContextMenu() {
+    setContextMenu((prev) => (prev.open ? { open: false, x: 0, y: 0, text: "" } : prev));
+  }
+
+  useEffect(() => {
+    if (!contextMenu.open) return undefined;
+    function onGlobalClose() {
+      closeContextMenu();
     }
+    window.addEventListener("click", onGlobalClose);
+    window.addEventListener("scroll", onGlobalClose, true);
+    window.addEventListener("resize", onGlobalClose);
+    return () => {
+      window.removeEventListener("click", onGlobalClose);
+      window.removeEventListener("scroll", onGlobalClose, true);
+      window.removeEventListener("resize", onGlobalClose);
+    };
+  }, [contextMenu.open]);
+
+  function clearSelectionAndContext() {
+    setSelectionPreview("");
+    closeContextMenu();
   }
 
   return (
@@ -614,6 +792,79 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
         />
       </label>
 
+      <div className="review-line-items">
+        <h4>Line Classification + Element Mapper</h4>
+        <div className="review-annotate-controls">
+          <span className="review-selection-preview">
+            {selectionPreview
+              ? `Selection: "${selectionPreview}" (right-click to choose element type)`
+              : "Select text, then right-click to choose element type."}
+          </span>
+        </div>
+        <div className="review-annotate-legend">
+          <span className="legend-chip legend-cast">Cast</span>
+          <span className="legend-chip legend-background">Background</span>
+          <span className="legend-chip legend-location">Location</span>
+          <span className="legend-chip legend-props">Props</span>
+          <span className="legend-chip legend-wardrobe">Wardrobe</span>
+          <span className="legend-chip legend-sets">Sets</span>
+          <span className="legend-hint">Click a colored token to remove it from that element list.</span>
+        </div>
+        {!current.line_items.length ? (
+          <p>No line tagging available for this scene.</p>
+        ) : (
+          <div
+            ref={lineMapperRef}
+            className="review-line-list"
+            onMouseUp={captureSelectionPreview}
+            onKeyUp={captureSelectionPreview}
+            onContextMenu={(event) => openElementTypeMenu(event)}
+          >
+            {current.line_items.map((item, lineIndex) => {
+              const segments = buildLineSegments(item.text || "", parserElementMap);
+              return (
+                <div key={`${current.scene_number}-${lineIndex}`} className="review-line-row">
+                  <span className={`review-line-type review-type-${item.type || "action"}`}>{item.type || "action"}</span>
+                  <div className="review-line-text">
+                    {segments.map((segment, segmentIndex) => {
+                      if (segment.kind === "plain") {
+                        return <span key={`plain-${lineIndex}-${segmentIndex}`}>{segment.text}</span>;
+                      }
+                      return (
+                        <button
+                          key={`token-${lineIndex}-${segmentIndex}`}
+                          type="button"
+                          className={`review-line-token review-token-${segment.type}`}
+                          title={`Remove ${segment.text} from ${segment.type}`}
+                          onClick={() => removeElementValue(segment.type, segment.token)}
+                          onContextMenu={(event) => openElementTypeMenu(event, segment.text)}
+                        >
+                          {segment.text}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {contextMenu.open ? (
+          <div
+            className="review-context-menu"
+            style={{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="review-context-title">{contextMenu.text}</div>
+            {ELEMENT_TYPES.map((type) => (
+              <button key={type} type="button" onClick={() => addFromContextMenu(type)}>
+                Add as {type === "location" ? "Location" : type}
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
+
       <div className="review-hint">
         <p><strong>Predicted cast:</strong> {toCsv(current.predicted.cast) || "None"}</p>
         <p>Select text in the script below, then click <strong>Create Scene From Selection</strong> to split a missed scene.</p>
@@ -625,50 +876,6 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
         <p><strong>Location mismatch:</strong> {locationMismatch ? `${current.predicted.location || "None"} -> ${current.corrected.location || "None"}` : "No"}</p>
       </div>
 
-      <div className="review-correction">
-        <h4>Manual Training Correction</h4>
-        <p>Use this when parser output is clearly wrong. Example: `JON` to `JON SMITH`.</p>
-        <div className="review-correction-row">
-          <label>
-            Element
-            <select value={aliasForm.elementType} onChange={(event) => setAliasForm((prev) => ({ ...prev, elementType: event.target.value }))}>
-              <option value="cast">Cast</option>
-              <option value="location">Location</option>
-              <option value="props">Props</option>
-              <option value="wardrobe">Wardrobe</option>
-              <option value="sets">Sets</option>
-            </select>
-          </label>
-          <label>
-            Alias (wrong output)
-            <input
-              type="text"
-              value={aliasForm.alias}
-              onChange={(event) => setAliasForm((prev) => ({ ...prev, alias: event.target.value }))}
-            />
-          </label>
-          <label>
-            Canonical (correct value)
-            <input
-              type="text"
-              value={aliasForm.canonical}
-              disabled={aliasForm.ignore}
-              onChange={(event) => setAliasForm((prev) => ({ ...prev, canonical: event.target.value }))}
-            />
-          </label>
-          <label className="inline-check">
-            <input
-              type="checkbox"
-              checked={aliasForm.ignore}
-              onChange={(event) => setAliasForm((prev) => ({ ...prev, ignore: event.target.checked }))}
-            />
-            Ignore Alias
-          </label>
-          <button type="button" onClick={saveAliasCorrection}>Save Correction</button>
-        </div>
-        {aliasStatus ? <p>{aliasStatus}</p> : null}
-      </div>
-
       <textarea
         ref={scriptTextRef}
         className="script-text-area review-script-text"
@@ -677,21 +884,6 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
         onChange={(event) => updateCurrent((scene) => ({ ...scene, script_text: event.target.value }))}
       />
 
-      <div className="review-line-items">
-        <h4>Line Classification (Beta)</h4>
-        {!current.line_items.length ? (
-          <p>No line tagging available for this scene.</p>
-        ) : (
-          <div className="review-line-list">
-            {current.line_items.map((item, lineIndex) => (
-              <div key={`${current.scene_number}-${lineIndex}`} className="review-line-row">
-                <span className={`review-line-type review-type-${item.type || "action"}`}>{item.type || "action"}</span>
-                <pre>{item.text || ""}</pre>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
     </section>
   );
 }

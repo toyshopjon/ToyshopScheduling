@@ -31,6 +31,85 @@ const FIELD_DEFS = {
   pageCount: { label: "Pages", value: (strip) => formatPageEighths(strip.pageEighths) },
   estTime: { label: "Est", value: (strip) => formatMinutes(strip.estTimeMinutes) },
 };
+
+const WORKBENCH_ELEMENT_TYPES = ["cast", "background", "location", "props", "wardrobe", "sets"];
+
+function normalizeName(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
+function escapeRegExp(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function normalizeSelection(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function classifySceneLines(scriptText) {
+  const lines = String(scriptText || "").split("\n");
+  const items = [];
+  let prevType = "blank";
+  for (const rawLine of lines) {
+    const line = String(rawLine || "");
+    const trimmed = line.trim();
+    let type = "action";
+    if (!trimmed) type = "blank";
+    else if (/^(INT|EXT|INT\/EXT|EXT\/INT)\.?\s+[A-Z0-9'"().\-/: ]+$/i.test(trimmed) && trimmed === trimmed.toUpperCase()) type = "heading";
+    else if (/^\([^)]+\)$/.test(trimmed)) type = "parenthetical";
+    else if (/^[A-Z][A-Z0-9' .\-()]+$/.test(trimmed) && trimmed.length <= 36) type = "character_cue";
+    else if (prevType === "character_cue" || prevType === "parenthetical") type = "dialogue";
+    items.push({ type, text: line });
+    prevType = type;
+  }
+  return items;
+}
+
+function workbenchTokenMap(draft) {
+  return {
+    cast: uniqueValues(draft.cast || []),
+    background: uniqueValues(draft.background || []),
+    props: uniqueValues(draft.props || []),
+    wardrobe: uniqueValues(draft.wardrobe || []),
+    sets: uniqueValues(draft.sets || []),
+    location: uniqueValues([draft.location || ""]),
+  };
+}
+
+function buildLineSegments(text, tokenMap) {
+  const lineText = String(text || "");
+  if (!lineText) return [{ kind: "plain", text: "" }];
+  const matches = [];
+  for (const type of WORKBENCH_ELEMENT_TYPES) {
+    const tokens = (tokenMap[type] || []).map((v) => String(v || "").trim()).filter(Boolean).sort((a, b) => b.length - a.length);
+    for (const token of tokens) {
+      const pattern = new RegExp(`(?<![A-Z0-9])${escapeRegExp(token)}(?![A-Z0-9])`, "gi");
+      let hit = pattern.exec(lineText);
+      while (hit) {
+        matches.push({ type, token, start: hit.index, end: hit.index + hit[0].length, len: hit[0].length });
+        hit = pattern.exec(lineText);
+      }
+    }
+  }
+  if (!matches.length) return [{ kind: "plain", text: lineText }];
+  matches.sort((a, b) => (a.start - b.start) || (b.len - a.len));
+  const accepted = [];
+  let cursor = 0;
+  for (const m of matches) {
+    if (m.start < cursor) continue;
+    accepted.push(m);
+    cursor = m.end;
+  }
+  const out = [];
+  let idx = 0;
+  for (const m of accepted) {
+    if (m.start > idx) out.push({ kind: "plain", text: lineText.slice(idx, m.start) });
+    out.push({ kind: "element", text: lineText.slice(m.start, m.end), type: m.type, token: m.token });
+    idx = m.end;
+  }
+  if (idx < lineText.length) out.push({ kind: "plain", text: lineText.slice(idx) });
+  return out;
+}
 function createStripId(prefix = "scene") {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -226,6 +305,8 @@ export function Stripboard({
   showWorkbench = true,
   layoutConfig,
   onSaveLayoutConfig,
+  castOrder = [],
+  castNumbersLocked = false,
   onReturnToStripView,
 }) {
   const [draggedStrip, setDraggedStrip] = useState(null);
@@ -244,12 +325,36 @@ export function Stripboard({
   const [entityType, setEntityType] = useState("cast");
   const [selectedEntity, setSelectedEntity] = useState("");
   const [chipInputs, setChipInputs] = useState({ cast: "", background: "", props: "", wardrobe: "", sets: "", location: "" });
+  const [workbenchSelection, setWorkbenchSelection] = useState("");
+  const [workbenchMenu, setWorkbenchMenu] = useState({ open: false, x: 0, y: 0, text: "" });
   const resizeRef = useRef(null);
   const paneResizeRef = useRef(false);
   const splitContainerRef = useRef(null);
+  const workbenchLineRef = useRef(null);
 
   const stripCount = useMemo(() => Object.values(stripsByDay).reduce((count, dayStrips) => count + dayStrips.length, 0), [stripsByDay]);
   const shootingDays = useMemo(() => days.filter((day) => day !== UNSCHEDULED_DAY), [days]);
+  const castNumberLookup = useMemo(() => {
+    const byKey = new Map();
+    const ordered = [];
+    for (const name of castOrder || []) {
+      const key = normalizeName(name);
+      if (!key || byKey.has(key)) continue;
+      byKey.set(key, ordered.length + 1);
+      ordered.push(name);
+    }
+    for (const strips of Object.values(stripsByDay || {})) {
+      for (const strip of strips || []) {
+        for (const raw of strip.cast || []) {
+          const key = normalizeName(raw);
+          if (!key || byKey.has(key)) continue;
+          byKey.set(key, ordered.length + 1);
+          ordered.push(raw);
+        }
+      }
+    }
+    return byKey;
+  }, [castOrder, stripsByDay]);
 
   useEffect(() => {
     const normalized = normalizeLayoutConfig(layoutConfig);
@@ -263,6 +368,21 @@ export function Stripboard({
   useEffect(() => {
     if (showWorkbench) setShowWorkbenchPanel(false);
   }, [showWorkbench]);
+
+  useEffect(() => {
+    if (!workbenchMenu.open) return undefined;
+    function closeMenu() {
+      setWorkbenchMenu((prev) => (prev.open ? { open: false, x: 0, y: 0, text: "" } : prev));
+    }
+    window.addEventListener("click", closeMenu);
+    window.addEventListener("scroll", closeMenu, true);
+    window.addEventListener("resize", closeMenu);
+    return () => {
+      window.removeEventListener("click", closeMenu);
+      window.removeEventListener("scroll", closeMenu, true);
+      window.removeEventListener("resize", closeMenu);
+    };
+  }, [workbenchMenu.open]);
 
   const allSceneRefs = useMemo(() => {
     const refs = [];
@@ -403,6 +523,17 @@ export function Stripboard({
     return String(strip[key] || "").toUpperCase();
   }
 
+  function getFieldValue(fieldKey, strip) {
+    if (fieldKey === "cast" && castNumbersLocked) {
+      const values = (strip.cast || [])
+        .map((name) => castNumberLookup.get(normalizeName(name)))
+        .filter((value) => Number.isFinite(value))
+        .sort((a, b) => a - b);
+      return values.join(", ");
+    }
+    return FIELD_DEFS[fieldKey]?.value(strip) || "";
+  }
+
   function startFirstShootDayFromUnscheduled() {
     const unscheduled = stripsByDay[UNSCHEDULED_DAY] ?? [];
     if (!unscheduled.length) return;
@@ -418,6 +549,8 @@ export function Stripboard({
   function selectStrip(strip, day) {
     setEditorTarget({ id: strip.id, day });
     setDraft(toDraft(strip, day));
+    setWorkbenchSelection("");
+    closeWorkbenchContextMenu();
   }
 
   function applyHeadingToDraft(heading) {
@@ -440,6 +573,8 @@ export function Stripboard({
   function resetForNew() {
     setEditorTarget(null);
     setDraft(toDraft(null, UNSCHEDULED_DAY));
+    setWorkbenchSelection("");
+    closeWorkbenchContextMenu();
   }
 
   function buildStripFromDraft() {
@@ -658,6 +793,61 @@ export function Stripboard({
     return rows;
   }, [stripsByDay, unscheduledSortKey, unscheduledSortDir]);
 
+  const workbenchLines = useMemo(() => classifySceneLines(draft.scriptText || ""), [draft.scriptText]);
+  const workbenchTokens = useMemo(() => workbenchTokenMap(draft), [draft]);
+
+  function captureWorkbenchSelection() {
+    const root = workbenchLineRef.current;
+    const selection = window.getSelection?.();
+    if (!root || !selection || selection.rangeCount === 0) {
+      setWorkbenchSelection("");
+      return;
+    }
+    const range = selection.getRangeAt(0);
+    if (!root.contains(range.commonAncestorContainer)) {
+      setWorkbenchSelection("");
+      return;
+    }
+    setWorkbenchSelection(normalizeSelection(selection.toString()));
+  }
+
+  function openWorkbenchContextMenu(event, explicitText = "") {
+    const candidate = normalizeSelection(explicitText || workbenchSelection);
+    if (!candidate) return;
+    event.preventDefault();
+    setWorkbenchSelection(candidate);
+    setWorkbenchMenu({ open: true, x: event.clientX, y: event.clientY, text: candidate });
+  }
+
+  function closeWorkbenchContextMenu() {
+    setWorkbenchMenu({ open: false, x: 0, y: 0, text: "" });
+  }
+
+  function removeWorkbenchElement(type, value) {
+    if (type === "location") {
+      const target = normalizeName(value);
+      setDraft((prev) => (normalizeName(prev.location) === target ? { ...prev, location: "" } : prev));
+      return;
+    }
+    setDraft((prev) => ({
+      ...prev,
+      [type]: (prev[type] || []).filter((item) => normalizeName(item) !== normalizeName(value)),
+    }));
+  }
+
+  function addWorkbenchElement(type, value) {
+    const candidate = normalizeSelection(value);
+    if (!candidate) return;
+    if (type === "location") {
+      setLocation(candidate);
+    } else {
+      addChip(type, candidate);
+    }
+    window.getSelection?.().removeAllRanges();
+    setWorkbenchSelection("");
+    closeWorkbenchContextMenu();
+  }
+
   function deleteDayBreakAfter(day) {
     const breakIndex = shootingDays.indexOf(day);
     if (breakIndex < 0 || breakIndex >= shootingDays.length - 1) return;
@@ -794,6 +984,72 @@ export function Stripboard({
               Script Text
               <textarea className="script-text-area" rows={4} value={draft.scriptText} onChange={(event) => setDraft((prev) => ({ ...prev, scriptText: event.target.value }))} />
             </label>
+            <div className="review-line-items">
+              <h4>Line Classification + Element Mapper</h4>
+              <div className="review-annotate-controls">
+                <span className="review-selection-preview">
+                  {workbenchSelection
+                    ? `Selection: "${workbenchSelection}" (right-click to choose element type)`
+                    : "Select text, then right-click to choose element type."}
+                </span>
+              </div>
+              <div className="review-annotate-legend">
+                <span className="legend-chip legend-cast">Cast</span>
+                <span className="legend-chip legend-background">Background</span>
+                <span className="legend-chip legend-location">Location</span>
+                <span className="legend-chip legend-props">Props</span>
+                <span className="legend-chip legend-wardrobe">Wardrobe</span>
+                <span className="legend-chip legend-sets">Sets</span>
+                <span className="legend-hint">Click highlighted tokens to remove.</span>
+              </div>
+              <div
+                ref={workbenchLineRef}
+                className="review-line-list"
+                onMouseUp={captureWorkbenchSelection}
+                onKeyUp={captureWorkbenchSelection}
+                onContextMenu={(event) => openWorkbenchContextMenu(event)}
+              >
+                {workbenchLines.map((item, lineIndex) => {
+                  const segments = buildLineSegments(item.text || "", workbenchTokens);
+                  return (
+                    <div key={`wb-${lineIndex}-${item.type}`} className="review-line-row">
+                      <span className={`review-line-type review-type-${item.type || "action"}`}>{item.type || "action"}</span>
+                      <div className="review-line-text">
+                        {segments.map((segment, segmentIndex) => {
+                          if (segment.kind === "plain") return <span key={`wb-p-${lineIndex}-${segmentIndex}`}>{segment.text}</span>;
+                          return (
+                            <button
+                              key={`wb-e-${lineIndex}-${segmentIndex}`}
+                              type="button"
+                              className={`review-line-token review-token-${segment.type}`}
+                              title={`Remove ${segment.text} from ${segment.type}`}
+                              onClick={() => removeWorkbenchElement(segment.type, segment.token)}
+                              onContextMenu={(event) => openWorkbenchContextMenu(event, segment.text)}
+                            >
+                              {segment.text}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {workbenchMenu.open ? (
+                <div
+                  className="review-context-menu"
+                  style={{ left: `${workbenchMenu.x}px`, top: `${workbenchMenu.y}px` }}
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <div className="review-context-title">{workbenchMenu.text}</div>
+                  {WORKBENCH_ELEMENT_TYPES.map((type) => (
+                    <button key={type} type="button" onClick={() => addWorkbenchElement(type, workbenchMenu.text)}>
+                      Add as {type === "location" ? "Location" : type}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
             <label>
               Notes
               <textarea value={draft.notes} onChange={(event) => setDraft((prev) => ({ ...prev, notes: event.target.value }))} />
@@ -940,7 +1196,7 @@ export function Stripboard({
                         >
                           {unscheduledFieldOrder.map((fieldKey) => (
                             <td key={`uns-${strip.id}-${fieldKey}`} style={{ width: `${columnWidths[fieldKey] || DEFAULT_LAYOUT.columnWidths[fieldKey] || 120}px` }}>
-                              {FIELD_DEFS[fieldKey]?.value(strip) || ""}
+                              {getFieldValue(fieldKey, strip)}
                             </td>
                           ))}
                         </tr>
@@ -998,7 +1254,7 @@ export function Stripboard({
                           >
                             {fieldOrder.map((fieldKey) => (
                               <td key={`sched-${strip.id}-${fieldKey}`} style={{ width: `${columnWidths[fieldKey] || DEFAULT_LAYOUT.columnWidths[fieldKey] || 120}px` }}>
-                                {FIELD_DEFS[fieldKey]?.value(strip) || ""}
+                                {getFieldValue(fieldKey, strip)}
                               </td>
                             ))}
                           </tr>

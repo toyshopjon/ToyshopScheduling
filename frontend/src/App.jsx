@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { CastElementsView } from "./components/CastElementsView";
 import { ParseUploader } from "./components/ParseUploader";
 import { SceneReviewMode } from "./components/SceneReviewMode";
 import { Stripboard } from "./components/Stripboard";
@@ -95,6 +96,8 @@ function createSchedule(name) {
       "Day 2": [],
       [UNSCHEDULED_DAY]: [],
     },
+    castOrder: [],
+    castNumbersLocked: false,
     stripLayout: { ...DEFAULT_STRIP_LAYOUT },
   };
 }
@@ -158,6 +161,8 @@ function normalizeWorkspace(candidate) {
             name: schedule.name || `Schedule ${scheduleIndex + 1}`,
             days,
             stripsByDay,
+            castOrder: Array.isArray(schedule.castOrder) ? [...schedule.castOrder] : [],
+            castNumbersLocked: Boolean(schedule.castNumbersLocked),
             stripLayout: normalizeStripLayout(schedule.stripLayout),
           };
         })
@@ -206,6 +211,29 @@ function toCsv(values) {
     .map((item) => String(item || "").trim())
     .filter(Boolean)
     .join(",");
+}
+
+function normalizeCastName(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
+function computeCastOrderFromSchedule(schedule) {
+  const counts = new Map();
+  for (const strips of Object.values(schedule?.stripsByDay || {})) {
+    for (const strip of strips || []) {
+      const seenInScene = new Set();
+      for (const raw of strip.cast || []) {
+        const name = String(raw || "").trim();
+        const key = normalizeCastName(name);
+        if (!name || seenInScene.has(key)) continue;
+        seenInScene.add(key);
+        counts.set(name, (counts.get(name) || 0) + 1);
+      }
+    }
+  }
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([name]) => name);
 }
 
 function extractDbId(prefixedId, prefix) {
@@ -427,6 +455,8 @@ export default function App() {
               "Day 1": [],
               "Day 2": [],
             },
+            castOrder: [],
+            castNumbersLocked: false,
             stripLayout: { ...DEFAULT_STRIP_LAYOUT },
           };
         });
@@ -791,6 +821,49 @@ export default function App() {
     }));
   }
 
+  function setCastOrderForActiveSchedule(nextCastOrder) {
+    updateActiveSchedule((schedule) => ({
+      ...schedule,
+      castOrder: Array.isArray(nextCastOrder) ? [...nextCastOrder] : [],
+    }));
+  }
+
+  function setCastNumbersLockedForActiveSchedule(locked) {
+    updateActiveSchedule((schedule) => {
+      const isLocked = Boolean(locked);
+      const nextOrder = (schedule.castOrder && schedule.castOrder.length)
+        ? schedule.castOrder
+        : computeCastOrderFromSchedule(schedule);
+      return {
+        ...schedule,
+        castNumbersLocked: isLocked,
+        castOrder: nextOrder,
+      };
+    });
+  }
+
+  function deleteCastEverywhere(castName) {
+    const target = String(castName || "").trim().toUpperCase();
+    if (!target) return;
+    updateActiveSchedule((schedule) => {
+      const nextStripsByDay = Object.fromEntries(
+        Object.entries(schedule.stripsByDay).map(([day, strips]) => [
+          day,
+          (strips || []).map((strip) => ({
+            ...strip,
+            cast: (strip.cast || []).filter((item) => String(item || "").trim().toUpperCase() !== target),
+          })),
+        ])
+      );
+      const nextOrder = (schedule.castOrder || []).filter((item) => String(item || "").trim().toUpperCase() !== target);
+      return {
+        ...schedule,
+        stripsByDay: nextStripsByDay,
+        castOrder: nextOrder,
+      };
+    });
+  }
+
   function addProject() {
     setWorkspace((prev) => {
       const nextProject = createProject(`Project ${prev.projects.length + 1}`);
@@ -858,6 +931,8 @@ export default function App() {
           name: `${activeSchedule.name} Copy ${copyNumber}`,
           days: [...activeSchedule.days],
           stripsByDay: JSON.parse(JSON.stringify(activeSchedule.stripsByDay)),
+          castOrder: [...(activeSchedule.castOrder || [])],
+          castNumbersLocked: Boolean(activeSchedule.castNumbersLocked),
           stripLayout: normalizeStripLayout(activeSchedule.stripLayout),
         };
 
@@ -916,6 +991,7 @@ export default function App() {
             <summary>Elements</summary>
             <div className="menu-content">
               <button type="button" onClick={() => setActiveView("elements")}>Elements View</button>
+              <button type="button" onClick={() => setActiveView("castElements")}>Cast View</button>
               <button type="button" onClick={() => setActiveView("fullScript")}>Full Script</button>
             </div>
           </details>
@@ -988,6 +1064,8 @@ export default function App() {
                   : "Character Report"
               : activeView === "elements"
                 ? "Elements View"
+                : activeView === "castElements"
+                  ? "Cast Elements"
                 : activeView === "fullScript"
                   ? "Full Script"
                   : "Review"}
@@ -1060,12 +1138,30 @@ export default function App() {
             showWorkbench={false}
             layoutConfig={activeSchedule.stripLayout}
             onSaveLayoutConfig={setStripLayoutForActiveSchedule}
+            castOrder={activeSchedule.castOrder || []}
+            castNumbersLocked={Boolean(activeSchedule.castNumbersLocked)}
             onReturnToStripView={() => {
               setActiveView("schedule");
               setReportView("stripboard");
             }}
           />
         </section>
+      ) : null}
+
+      {activeView === "castElements" ? (
+        <CastElementsView
+          stripsByDay={activeSchedule.stripsByDay}
+          castOrder={activeSchedule.castOrder || []}
+          castNumbersLocked={Boolean(activeSchedule.castNumbersLocked)}
+          onToggleCastNumbersLocked={setCastNumbersLockedForActiveSchedule}
+          onSaveCastOrder={setCastOrderForActiveSchedule}
+          onDeleteCast={deleteCastEverywhere}
+          onBackToElements={() => setActiveView("elements")}
+          onBackToStrip={() => {
+            setActiveView("schedule");
+            setReportView("stripboard");
+          }}
+        />
       ) : null}
 
       {activeView === "review" ? (
@@ -1110,6 +1206,8 @@ export default function App() {
             showWorkbench
             layoutConfig={activeSchedule.stripLayout}
             onSaveLayoutConfig={setStripLayoutForActiveSchedule}
+            castOrder={activeSchedule.castOrder || []}
+            castNumbersLocked={Boolean(activeSchedule.castNumbersLocked)}
           />
         </section>
       ) : null}
