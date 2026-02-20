@@ -99,6 +99,15 @@ textarea {
   align-items: center;
 }
 
+.app-menubar {
+  gap: 0;
+  align-items: stretch;
+  background: #e7ebf2;
+  border: 1px solid #c7cfdd;
+  border-radius: 8px;
+  padding: 2px;
+}
+
 .menu-group {
   position: relative;
 }
@@ -112,6 +121,23 @@ textarea {
   background: #121b2d;
   color: #f9fbff;
   text-transform: uppercase;
+}
+
+.app-menubar .menu-group > summary {
+  border: 0;
+  border-radius: 6px;
+  padding: 6px 12px;
+  background: transparent;
+  color: #1a263d;
+  text-transform: none;
+  font-family: "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.app-menubar .menu-group[open] > summary,
+.app-menubar .menu-group > summary:hover {
+  background: #dbe3f4;
 }
 
 .menu-group > summary::-webkit-details-marker {
@@ -136,6 +162,12 @@ textarea {
   display: grid;
   gap: 4px;
   font-size: 13px;
+}
+
+.menu-content hr {
+  border: 0;
+  border-top: 1px solid #dbe3f0;
+  margin: 4px 0;
 }
 
 .menu-check {
@@ -214,6 +246,40 @@ textarea {
   gap: 8px;
   margin-bottom: 12px;
   align-items: center;
+}
+
+.conflict-panel {
+  border: 1px solid #d7c29a;
+  background: #fff8e9;
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 0 0 10px;
+}
+
+.conflict-list {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.conflict-chip {
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.conflict-chip.high {
+  background: #ffe6e6;
+  border: 1px solid #d69b9b;
+  color: #6b1d1d;
+}
+
+.conflict-chip.medium {
+  background: #fff3d8;
+  border: 1px solid #d5bd8f;
+  color: #6b4b12;
 }
 
 .inline-control {
@@ -342,8 +408,69 @@ textarea {
 }
 
 .scene-row.selected {
-  outline: 2px solid #1e8a46;
+  outline: 3px solid #1e8a46;
   outline-offset: -2px;
+  box-shadow: inset 0 0 0 9999px rgba(30, 138, 70, 0.16);
+}
+
+.scene-row.multi-selected {
+  outline: 2px dashed #2f5bd1;
+  outline-offset: -2px;
+  box-shadow: inset 0 0 0 9999px rgba(47, 91, 209, 0.12);
+}
+
+.drop-placeholder-row td {
+  background: #e7f0ff;
+  color: #1f3f7a;
+  border-top: 2px dashed #2f5bd1;
+  border-bottom: 2px dashed #2f5bd1;
+  font-weight: 700;
+  text-align: center;
+  padding: 6px 8px;
+}
+
+.drag-preview-pill {
+  pointer-events: none;
+  border: 1px solid #304970;
+  background: #14243e;
+  color: #ffffff;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  box-shadow: 0 8px 20px rgba(7, 15, 30, 0.28);
+}
+
+.drag-preview-strip {
+  pointer-events: none;
+  min-width: 220px;
+  max-width: 360px;
+  border: 1px solid #2d3f63;
+  background: #0f1d34;
+  color: #ffffff;
+  border-radius: 8px;
+  padding: 7px 9px;
+  box-shadow: 0 10px 24px rgba(8, 17, 34, 0.34);
+}
+
+.drag-preview-strip-top {
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
+.drag-preview-strip-sub {
+  font-size: 11px;
+  opacity: 0.95;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.drag-preview-strip-more {
+  margin-top: 4px;
+  font-size: 10px;
+  opacity: 0.85;
 }
 
 .day-break-row td {
@@ -353,11 +480,45 @@ textarea {
   letter-spacing: 0.01em;
 }
 
+.day-break-row.day-break-drop-target td {
+  background: #1a2a48;
+  border-top: 2px dashed #87a7e3;
+  border-bottom: 2px dashed #87a7e3;
+}
+
 .day-break-content {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
+}
+
+.day-break-meta {
+  flex: 1 1 auto;
+}
+
+.day-conflict-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.conflict-badge {
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.conflict-badge.high {
+  background: #b73a3a;
+  color: #ffffff;
+}
+
+.conflict-badge.medium {
+  background: #d79e1a;
+  color: #1b1b1b;
 }
 
 .day-break-delete {
@@ -564,11 +725,27 @@ textarea {
   background: #f8fbff;
 }
 
+.dood-table td,
+.dood-table th {
+  text-align: center;
+}
+
+.dood-table td:nth-child(2),
+.dood-table th:nth-child(2) {
+  text-align: left;
+}
+
+.dood-working-cell {
+  background: #1f9a53;
+  color: #ffffff;
+  font-weight: 700;
+}
+
 .scene-editor {
   background: #f9fbff;
   border: 1px solid var(--ts-border);
   border-radius: 8px;
-  padding: 10px;
+  padding: 8px;
   margin-top: 10px;
   margin-bottom: 12px;
 }
@@ -596,13 +773,13 @@ textarea {
 
 .scene-editor form {
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 .scene-editor label {
   display: grid;
-  gap: 4px;
-  font-size: 14px;
+  gap: 3px;
+  font-size: 12px;
 }
 
 .scene-editor input,
@@ -610,20 +787,20 @@ textarea {
 .scene-editor textarea {
   width: 100%;
   box-sizing: border-box;
-  padding: 7px 8px;
+  padding: 6px 7px;
   border: 1px solid #cfd8e8;
   border-radius: 6px;
   font: inherit;
 }
 
 .scene-editor textarea {
-  min-height: 85px;
+  min-height: 72px;
 }
 
 .editor-row-primary {
   display: grid;
   gap: 8px;
-  grid-template-columns: minmax(11ch, 12ch) minmax(8ch, 9ch) minmax(13ch, 15ch) minmax(28ch, 1fr);
+  grid-template-columns: minmax(10ch, 12ch) minmax(8ch, 9ch) minmax(12ch, 14ch) minmax(22ch, 1fr) minmax(12ch, 14ch) minmax(12ch, 14ch) minmax(14ch, 16ch);
 }
 
 .field-scene-number input {
@@ -638,29 +815,23 @@ textarea {
   min-width: 13ch;
 }
 
-.field-heading input {
-  min-width: 28ch;
-}
-
-.editor-row-secondary {
-  display: grid;
-  gap: 8px;
-  grid-template-columns: repeat(3, minmax(18ch, 1fr));
+.field-location input {
+  min-width: 22ch;
 }
 
 .chip-grid {
   display: grid;
-  gap: 8px;
-  grid-template-columns: repeat(5, minmax(180px, 1fr));
+  gap: 6px;
+  grid-template-columns: repeat(5, minmax(150px, 1fr));
 }
 
 .chip-editor {
   border: 1px solid #cfd8e8;
   border-radius: 8px;
   background: #ffffff;
-  padding: 8px;
+  padding: 6px;
   display: grid;
-  gap: 8px;
+  gap: 6px;
   align-content: start;
 }
 
@@ -675,8 +846,8 @@ textarea {
 .chip-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  min-height: 32px;
+  gap: 4px;
+  min-height: 26px;
 }
 
 .chip {
@@ -684,8 +855,8 @@ textarea {
   background: #ecf2ff;
   color: #16284d;
   border-radius: 999px;
-  padding: 4px 8px;
-  font-size: 12px;
+  padding: 3px 7px;
+  font-size: 11px;
   line-height: 1;
   display: inline-flex;
   align-items: center;
@@ -705,7 +876,7 @@ textarea {
 .chip-controls {
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 6px;
+  gap: 4px;
 }
 
 .field-page-count input {
@@ -719,6 +890,16 @@ textarea {
   white-space: pre;
   tab-size: 4;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.notes-stack {
+  display: grid;
+  gap: 6px;
+}
+
+.notes-text-area {
+  min-height: calc(1.3em * 4 + 14px);
+  resize: vertical;
 }
 
 .review-script-text {
@@ -793,7 +974,7 @@ textarea {
 .review-line-list {
   display: grid;
   gap: 4px;
-  max-height: 240px;
+  max-height: 180px;
   overflow: auto;
   user-select: text;
 }
@@ -1052,13 +1233,12 @@ textarea {
     max-height: none;
   }
 
-  .editor-row-primary,
-  .editor-row-secondary {
+  .editor-row-primary {
     grid-template-columns: 1fr;
   }
 
   .chip-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .editor-actions {

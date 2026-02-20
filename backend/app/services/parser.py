@@ -7,14 +7,16 @@ import pdfplumber
 from pypdf import PdfReader
 
 SCENE_HEADING_PATTERN = re.compile(
-    r"^(?P<prefix>INT\.?|EXT\.?|INT/EXT\.?|EXT/INT\.?)\s+"
+    r"^(?:(?P<scene_no>\d+[A-Z]?)\s+)?"
+    r"(?P<prefix>INT\.?|EXT\.?|INT/EXT\.?|EXT/INT\.?|INTERIOR\.?|EXTERIOR\.?|I/E\.?)\s+"
     r"(?P<location>.+?)"
     r"\s*[-–]\s*"
-    r"(?P<time>DAY|NIGHT|DAWN|DUSK|MORNING|EVENING)\s*$",
+    r"(?P<time>DAY|NIGHT|DAWN|DUSK|MORNING|EVENING)"
+    r"(?:\s+(?P<trailing_no>\d+[A-Z]?))?\s*$",
     re.IGNORECASE,
 )
 SCENE_PREFIX_PATTERN = re.compile(
-    r"^(?P<prefix>INT\.?|EXT\.?|INT\s*/\s*EXT\.?|EXT\s*/\s*INT\.?)\b",
+    r"^(?P<prefix>INT\.?|EXT\.?|INT\s*/\s*EXT\.?|EXT\s*/\s*INT\.?|INTERIOR\.?|EXTERIOR\.?|I/E\.?)\b",
     re.IGNORECASE,
 )
 PAGE_NUMBER_PATTERN = re.compile(
@@ -80,6 +82,10 @@ class Scene:
 
 
 class ScriptParser:
+    def _strip_scene_number_prefix(self, value: str) -> str:
+        text = str(value or "").strip()
+        return re.sub(r"^\d+[A-Z]?\s+", "", text, count=1)
+
     def parse_pdf(
         self,
         payload: bytes,
@@ -89,6 +95,8 @@ class ScriptParser:
         if progress_callback:
             progress_callback(0, "Opening PDF...")
         text = self._extract_text(payload, progress_callback)
+        if not str(text or "").strip():
+            raise ValueError("No extractable text found in PDF. The file may be image-only or OCR is required.")
         scenes = self._split_into_scenes(text, progress_callback, alias_map or {})
         serialized = [self._serialize(scene) for scene in scenes]
         if progress_callback:
@@ -105,6 +113,8 @@ class ScriptParser:
     ) -> str:
         # pdfplumber/pdfminer layout extraction preserves screenplay whitespace
         # more reliably than pypdf for indents, spacing, and line structure.
+        # Some PDFs return near-empty layout text; in that case prefer pypdf output.
+        layout_text = ""
         try:
             with pdfplumber.open(io.BytesIO(payload)) as pdf:
                 page_count = len(pdf.pages)
@@ -115,18 +125,36 @@ class ScriptParser:
                     if progress_callback and page_count:
                         progress = int((page_index / page_count) * 65)
                         progress_callback(progress, f"Reading PDF pages ({page_index}/{page_count})...")
-                return "\n".join(pages)
+                layout_text = "\n".join(pages)
         except Exception:
-            # Fallback keeps parser resilient if pdfplumber fails on a file.
-            reader = PdfReader(io.BytesIO(payload))
-            page_count = len(reader.pages)
-            pages = []
-            for page_index, page in enumerate(reader.pages, start=1):
-                pages.append(page.extract_text() or "")
-                if progress_callback and page_count:
-                    progress = int((page_index / page_count) * 65)
-                    progress_callback(progress, f"Reading PDF pages ({page_index}/{page_count})...")
-            return "\n".join(pages)
+            layout_text = ""
+
+        reader_text = self._extract_text_pypdf(payload, progress_callback) if self._is_text_too_sparse(layout_text) else ""
+        if len(reader_text.strip()) > len(layout_text.strip()):
+            return reader_text
+        return layout_text
+
+    def _extract_text_pypdf(
+        self,
+        payload: bytes,
+        progress_callback: Callable[[int, str], None] | None = None,
+    ) -> str:
+        reader = PdfReader(io.BytesIO(payload))
+        page_count = len(reader.pages)
+        pages = []
+        for page_index, page in enumerate(reader.pages, start=1):
+            pages.append(page.extract_text() or "")
+            if progress_callback and page_count:
+                progress = int((page_index / page_count) * 65)
+                progress_callback(progress, f"Reading PDF pages ({page_index}/{page_count})...")
+        return "\n".join(pages)
+
+    def _is_text_too_sparse(self, text: str) -> bool:
+        # Heuristic: if almost no alphanumeric text is present, primary extraction failed.
+        if not text:
+            return True
+        alnum_count = sum(1 for ch in text if ch.isalnum())
+        return alnum_count < 100
 
     def _split_into_scenes(
         self,
@@ -136,14 +164,49 @@ class ScriptParser:
     ) -> list[Scene]:
         alias_map = alias_map or {}
         lines = text.splitlines()
-        scenes: list[Scene] = []
+        scenes = self._split_with_heading_mode(lines, alias_map, strict_all_caps=True, progress_callback=progress_callback)
+        if not scenes:
+            scenes = self._split_with_heading_mode(lines, alias_map, strict_all_caps=False, progress_callback=progress_callback)
 
+        # If no headings were detected, keep the import usable with a single scene.
+        if not scenes:
+            cleaned_lines = [line for line in lines if not self._is_page_number_line(line.strip())]
+            if cleaned_lines:
+                scene = self._make_scene(
+                    1,
+                    "SCENE 1",
+                    "",
+                    "DAY",
+                    set(),
+                    cleaned_lines,
+                )
+                scenes = [scene]
+
+        augmented_scenes: list[Scene] = []
+        all_speaking_characters: set[str] = set()
+        for scene in scenes:
+            all_speaking_characters.update(scene.cast)
+        total_scenes = max(1, len(scenes))
+        for scene_index, scene in enumerate(scenes, start=1):
+            augmented_scenes.append(self._augment_scene_cast(scene, all_speaking_characters, alias_map))
+            if progress_callback:
+                progress = 90 + int((scene_index / total_scenes) * 9)
+                progress_callback(progress, f"Resolving cast and elements ({scene_index}/{total_scenes})...")
+        return augmented_scenes
+
+    def _split_with_heading_mode(
+        self,
+        lines: list[str],
+        alias_map: dict[str, str],
+        strict_all_caps: bool,
+        progress_callback: Callable[[int, str], None] | None = None,
+    ) -> list[Scene]:
+        scenes: list[Scene] = []
         active_heading = ""
         active_location = ""
         active_time = ""
         speaking_cast: set[str] = set()
         scene_lines: list[str] = []
-        all_speaking_characters: set[str] = set()
 
         total_lines = max(1, len(lines))
         last_line_progress = -1
@@ -160,7 +223,7 @@ class ScriptParser:
                         last_line_progress = line_progress
                 continue
 
-            if self._is_scene_heading_line(stripped_line):
+            if self._is_scene_heading_line(stripped_line, strict_all_caps=strict_all_caps):
                 location, time_of_day = self._extract_heading_fields(stripped_line)
                 if active_heading:
                     scenes.append(
@@ -185,7 +248,6 @@ class ScriptParser:
                     canonical = self._canonicalize_alias(cue_name, alias_map)
                     if canonical:
                         speaking_cast.add(canonical)
-                        all_speaking_characters.add(canonical)
             if progress_callback:
                 line_progress = 65 + int((line_index / total_lines) * 25)
                 if line_progress != last_line_progress:
@@ -206,15 +268,7 @@ class ScriptParser:
                     scene_lines,
                 )
             )
-
-        augmented_scenes: list[Scene] = []
-        total_scenes = max(1, len(scenes))
-        for scene_index, scene in enumerate(scenes, start=1):
-            augmented_scenes.append(self._augment_scene_cast(scene, all_speaking_characters, alias_map))
-            if progress_callback:
-                progress = 90 + int((scene_index / total_scenes) * 9)
-                progress_callback(progress, f"Resolving cast and elements ({scene_index}/{total_scenes})...")
-        return augmented_scenes
+        return scenes
 
     def _extract_character_cue(self, stripped_line: str) -> str | None:
         if not stripped_line:
@@ -373,28 +427,36 @@ class ScriptParser:
             return False
         return bool(PAGE_NUMBER_PATTERN.fullmatch(stripped_line))
 
-    def _is_scene_heading_line(self, stripped_line: str) -> bool:
+    def _is_scene_heading_line(self, stripped_line: str, strict_all_caps: bool = True) -> bool:
         if not stripped_line:
             return False
-        if not SCENE_PREFIX_PATTERN.match(stripped_line):
+        candidate = self._strip_scene_number_prefix(stripped_line)
+        if not SCENE_PREFIX_PATTERN.match(candidate):
             return False
-        # Rule: headings that begin with INT/EXT and are all-caps.
-        has_letter = any(char.isalpha() for char in stripped_line)
-        return has_letter and stripped_line == stripped_line.upper()
+        has_letter = any(char.isalpha() for char in candidate)
+        if not has_letter:
+            return False
+        if strict_all_caps:
+            # Primary rule for screenplay imports.
+            return candidate == candidate.upper()
+        # Relaxed fallback for PDFs where case is degraded during extraction.
+        return True
 
     def _extract_heading_fields(self, heading: str) -> tuple[str, str]:
-        exact_match = SCENE_HEADING_PATTERN.match(heading)
+        candidate = self._strip_scene_number_prefix(heading)
+        exact_match = SCENE_HEADING_PATTERN.match(candidate)
         if exact_match:
             return (
                 self._clean_location_text(exact_match.group("location")),
                 exact_match.group("time").strip().upper(),
             )
 
-        prefix_match = SCENE_PREFIX_PATTERN.match(heading)
+        prefix_match = SCENE_PREFIX_PATTERN.match(candidate)
         if not prefix_match:
             return "", "DAY"
 
-        body = heading[prefix_match.end():].strip()
+        body = candidate[prefix_match.end():].strip()
+        body = re.sub(r"\s+\d+[A-Z]?$", "", body).strip()
         time_tokens = {"DAY", "NIGHT", "DAWN", "DUSK", "MORNING", "EVENING", "SUNRISE", "SUNSET"}
         location = body
         time_of_day = "DAY"

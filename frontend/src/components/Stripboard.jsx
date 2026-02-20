@@ -173,6 +173,79 @@ function getDayTotalMinutes(strips = []) {
   return strips.reduce((total, strip) => total + (Number.isFinite(strip.estTimeMinutes) ? strip.estTimeMinutes : 0), 0);
 }
 
+function formatConflictMinutes(totalMinutes) {
+  const safe = Math.max(0, Number.isFinite(totalMinutes) ? totalMinutes : 0);
+  const h = Math.floor(safe / 60);
+  const m = safe % 60;
+  return `${h}h ${String(m).padStart(2, "0")}m`;
+}
+
+function getDayConflicts(day, strips = []) {
+  const conflicts = [];
+  const duplicateSceneNumbers = new Set();
+  const seenSceneNumbers = new Set();
+  const castMinutes = new Map();
+  const uniqueLocations = new Set();
+  let unresolvedCount = 0;
+
+  for (const strip of strips) {
+    const sceneNumber = String(strip.sceneNumber ?? "").trim();
+    if (sceneNumber) {
+      if (seenSceneNumbers.has(sceneNumber)) duplicateSceneNumbers.add(sceneNumber);
+      seenSceneNumbers.add(sceneNumber);
+    }
+
+    const location = String(strip.location || "").trim().toUpperCase();
+    if (location) uniqueLocations.add(location);
+
+    if (strip.needsReview) unresolvedCount += 1;
+
+    const sceneMinutes = Number.isFinite(strip.estTimeMinutes) ? Math.max(0, strip.estTimeMinutes) : 0;
+    const castList = uniqueValues(strip.cast || []);
+    for (const castName of castList) {
+      castMinutes.set(castName, (castMinutes.get(castName) || 0) + sceneMinutes);
+    }
+  }
+
+  if (duplicateSceneNumbers.size) {
+    conflicts.push({
+      severity: "high",
+      code: "duplicate_scene",
+      title: `Duplicate scene numbers: ${Array.from(duplicateSceneNumbers).join(", ")}`,
+    });
+  }
+
+  if (uniqueLocations.size > 3) {
+    conflicts.push({
+      severity: "medium",
+      code: "moves",
+      title: `High company moves (${uniqueLocations.size} scenes)`,
+    });
+  }
+
+  if (unresolvedCount > 0) {
+    conflicts.push({
+      severity: "medium",
+      code: "needs_review",
+      title: `${unresolvedCount} scene${unresolvedCount === 1 ? "" : "s"} still need review`,
+    });
+  }
+
+  const overworkedCast = Array.from(castMinutes.entries())
+    .filter(([, minutes]) => minutes > 600)
+    .sort((a, b) => b[1] - a[1]);
+  if (overworkedCast.length) {
+    const preview = overworkedCast.slice(0, 2).map(([name, minutes]) => `${name} (${formatConflictMinutes(minutes)})`).join(", ");
+    conflicts.push({
+      severity: "high",
+      code: "cast_load",
+      title: `Cast over 10h: ${preview}${overworkedCast.length > 2 ? ` +${overworkedCast.length - 2}` : ""}`,
+    });
+  }
+
+  return conflicts.map((entry) => ({ ...entry, day }));
+}
+
 function getStripStyle(strip, colorMode) {
   if (colorMode === "none") return {};
   const time = String(strip.timeOfDay || "").toUpperCase();
@@ -224,6 +297,14 @@ function parseHeadingFields(heading, fallback = {}) {
     location: location || (fallback.location || ""),
     timeOfDay,
   };
+}
+
+function buildHeadingFromParts(intExt, location, timeOfDay) {
+  const ie = String(intExt || "INT").trim().toUpperCase();
+  const loc = String(location || "").trim();
+  const tod = String(timeOfDay || "").trim().toUpperCase();
+  if (!loc) return "";
+  return `${ie}. ${loc}${tod ? ` - ${tod}` : ""}`;
 }
 
 function toDraft(strip, day) {
@@ -320,6 +401,10 @@ export function Stripboard({
   const [showUnscheduledPanel, setShowUnscheduledPanel] = useState(true);
   const [unscheduledSortKey, setUnscheduledSortKey] = useState("sceneNumber");
   const [unscheduledSortDir, setUnscheduledSortDir] = useState("asc");
+  const [selectedStripIds, setSelectedStripIds] = useState([]);
+  const [lastSelectedRow, setLastSelectedRow] = useState({ day: "", id: "" });
+  const [dropPreview, setDropPreview] = useState(null);
+  const [draggedDay, setDraggedDay] = useState("");
   const [editorTarget, setEditorTarget] = useState(null);
   const [draft, setDraft] = useState(toDraft(null, UNSCHEDULED_DAY));
   const [entityType, setEntityType] = useState("cast");
@@ -513,6 +598,31 @@ export function Stripboard({
     });
   }
 
+  function moveStrips(stripIds, targetDay, beforeStripId = null) {
+    const ids = Array.from(new Set((stripIds || []).filter(Boolean)));
+    if (!ids.length || !targetDay) return;
+    setStripsByDay((prev) => {
+      const idSet = new Set(ids);
+      const next = Object.fromEntries(Object.entries(prev).map(([day, strips]) => [day, [...strips]]));
+      const moving = [];
+      for (const day of Object.keys(next)) {
+        const kept = [];
+        for (const strip of next[day]) {
+          if (idSet.has(strip.id)) moving.push(strip);
+          else kept.push(strip);
+        }
+        next[day] = kept;
+      }
+      if (!moving.length) return prev;
+      const targetList = next[targetDay] ?? [];
+      const targetIndex = beforeStripId ? targetList.findIndex((strip) => strip.id === beforeStripId) : -1;
+      if (targetIndex < 0) targetList.push(...moving);
+      else targetList.splice(targetIndex, 0, ...moving);
+      next[targetDay] = targetList;
+      return next;
+    });
+  }
+
   function getSortValue(strip, key) {
     if (key === "cast" || key === "background" || key === "props" || key === "wardrobe" || key === "sets") {
       return (strip[key] || []).join(", ").toUpperCase();
@@ -551,6 +661,126 @@ export function Stripboard({
     setDraft(toDraft(strip, day));
     setWorkbenchSelection("");
     closeWorkbenchContextMenu();
+  }
+
+  function handleRowClick(event, strip, day, orderedRows = []) {
+    const isToggle = event.metaKey || event.ctrlKey;
+    const isRange = event.shiftKey;
+    const currentId = strip.id;
+    const rowIds = orderedRows.map((row) => row.id);
+    const currentIndex = rowIds.indexOf(currentId);
+    if (currentIndex < 0) {
+      selectStrip(strip, day);
+      return;
+    }
+
+    if (isRange && lastSelectedRow.id && lastSelectedRow.day === day) {
+      const lastIndex = rowIds.indexOf(lastSelectedRow.id);
+      if (lastIndex >= 0) {
+        const start = Math.min(lastIndex, currentIndex);
+        const end = Math.max(lastIndex, currentIndex);
+        const rangeIds = rowIds.slice(start, end + 1);
+        setSelectedStripIds((prev) => (isToggle ? Array.from(new Set([...prev, ...rangeIds])) : rangeIds));
+      } else {
+        setSelectedStripIds([currentId]);
+      }
+    } else if (isToggle) {
+      setSelectedStripIds((prev) => (
+        prev.includes(currentId)
+          ? prev.filter((id) => id !== currentId)
+          : [...prev, currentId]
+      ));
+      setLastSelectedRow({ day, id: currentId });
+    } else {
+      setSelectedStripIds([currentId]);
+      setLastSelectedRow({ day, id: currentId });
+    }
+    selectStrip(strip, day);
+  }
+
+  function draggedIdsPayload(fallbackId) {
+    if (!draggedStrip) return [];
+    if (Array.isArray(draggedStrip.ids) && draggedStrip.ids.length) return draggedStrip.ids;
+    if (draggedStrip.id) return [draggedStrip.id];
+    return fallbackId ? [fallbackId] : [];
+  }
+
+  function clearDragState() {
+    setDraggedStrip(null);
+    setDraggedDay("");
+    setDropPreview(null);
+  }
+
+  function reorderShootingDays(sourceDay, targetDay) {
+    if (!sourceDay || !targetDay || sourceDay === targetDay) return;
+    const baseDays = days.filter((day) => day !== UNSCHEDULED_DAY);
+    const fromIndex = baseDays.indexOf(sourceDay);
+    const toIndex = baseDays.indexOf(targetDay);
+    if (fromIndex < 0 || toIndex < 0) return;
+    const reordered = [...baseDays];
+    const [picked] = reordered.splice(fromIndex, 1);
+    reordered.splice(toIndex, 0, picked);
+
+    const unscheduledIndex = days.indexOf(UNSCHEDULED_DAY);
+    const nextDays = unscheduledIndex === days.length - 1
+      ? [...reordered, UNSCHEDULED_DAY]
+      : [UNSCHEDULED_DAY, ...reordered];
+    setDays(nextDays);
+  }
+
+  function beginStripDrag(event, stripId, day, isMultiSelected = false) {
+    const isSelected = selectedStripIds.includes(stripId);
+    const ids = isSelected ? selectedStripIds : [stripId];
+    const safeIds = ids.length ? ids : [stripId];
+    if (!isSelected) {
+      setSelectedStripIds([stripId]);
+      setLastSelectedRow({ day, id: stripId });
+    }
+    setDraggedStrip({ ids: safeIds, day });
+    setDropPreview(null);
+    setDraggedDay("");
+
+    if (!event?.dataTransfer) return;
+    event.dataTransfer.effectAllowed = "move";
+    const preview = document.createElement("div");
+    const sourceList = stripsByDay?.[day] || [];
+    const leadStrip = sourceList.find((item) => item.id === stripId) || sourceList.find((item) => safeIds.includes(item.id));
+    preview.className = "drag-preview-strip";
+    const sceneText = leadStrip ? `SC ${leadStrip.sceneNumber || ""}` : "SC";
+    const subText = leadStrip
+      ? `${leadStrip.intExt || ""} ${leadStrip.timeOfDay || ""} ${leadStrip.location || leadStrip.heading || ""}`.trim()
+      : "Moving strip";
+    preview.innerHTML = `
+      <div class="drag-preview-strip-top">${sceneText}</div>
+      <div class="drag-preview-strip-sub">${subText || "Moving strip"}</div>
+      ${safeIds.length > 1 ? `<div class="drag-preview-strip-more">+${safeIds.length - 1} more</div>` : ""}
+    `;
+    document.body.appendChild(preview);
+    event.dataTransfer.setDragImage(preview, 18, 18);
+    window.setTimeout(() => {
+      if (preview.parentNode) preview.parentNode.removeChild(preview);
+    }, 0);
+  }
+
+  function beginDayDrag(event, day) {
+    setDraggedDay(day);
+    setDraggedStrip(null);
+    setDropPreview(null);
+    if (!event?.dataTransfer) return;
+    event.dataTransfer.effectAllowed = "move";
+    const preview = document.createElement("div");
+    preview.className = "drag-preview-pill";
+    preview.textContent = `Move ${day}`;
+    document.body.appendChild(preview);
+    event.dataTransfer.setDragImage(preview, 18, 18);
+    window.setTimeout(() => {
+      if (preview.parentNode) preview.parentNode.removeChild(preview);
+    }, 0);
+  }
+
+  function setDropPreviewBefore(day, beforeId, draggedIds = []) {
+    if (beforeId && draggedIds.includes(beforeId)) return;
+    setDropPreview({ day, beforeId: beforeId || null });
   }
 
   function applyHeadingToDraft(heading) {
@@ -656,7 +886,14 @@ export function Stripboard({
   function setLocation(value) {
     const candidate = String(value || "").trim();
     if (!candidate) return;
-    setDraft((prev) => ({ ...prev, location: candidate.replace(/^[\s.\-:;]+/, "") }));
+    setDraft((prev) => {
+      const location = candidate.replace(/^[\s.\-:;]+/, "");
+      return {
+        ...prev,
+        location,
+        heading: buildHeadingFromParts(prev.intExt, location, prev.timeOfDay),
+      };
+    });
     setChipInputs((prev) => ({ ...prev, location: "" }));
   }
 
@@ -757,15 +994,24 @@ export function Stripboard({
   const stackedDayBlocks = useMemo(() => {
     return shootingDays.map((day, index) => {
       const strips = stripsByDay[day] ?? [];
+      const conflicts = getDayConflicts(day, strips);
       return {
         day,
         dayIndex: index + 1,
         strips,
         pageTotal: getDayTotalEighths(strips),
         timeTotal: getDayTotalMinutes(strips),
+        conflicts,
       };
     });
   }, [shootingDays, stripsByDay]);
+  const conflictSummary = useMemo(() => {
+    const out = [];
+    for (const block of stackedDayBlocks) {
+      for (const conflict of block.conflicts || []) out.push(conflict);
+    }
+    return out;
+  }, [stackedDayBlocks]);
 
   const unscheduledFieldOrder = useMemo(
     () => fieldOrder.filter((fieldKey) => fieldKey !== "heading"),
@@ -796,6 +1042,29 @@ export function Stripboard({
     });
     return rows;
   }, [stripsByDay, unscheduledSortKey, unscheduledSortDir]);
+
+  useEffect(() => {
+    const available = new Set(unscheduledRows.map((strip) => strip.id));
+    const allStripIds = new Set(Object.values(stripsByDay).flat().map((strip) => strip.id));
+    setSelectedStripIds((prev) => prev.filter((id) => allStripIds.has(id)));
+    if (lastSelectedRow.id && !allStripIds.has(lastSelectedRow.id)) {
+      setLastSelectedRow({ day: "", id: "" });
+    }
+  }, [lastSelectedRow.id, stripsByDay, unscheduledRows]);
+
+  function moveAllScheduledToBoneyard() {
+    const scheduled = shootingDays.flatMap((day) => stripsByDay[day] || []);
+    if (!scheduled.length) return;
+    setStripsByDay((prev) => ({
+      [UNSCHEDULED_DAY]: [...(prev[UNSCHEDULED_DAY] || []), ...shootingDays.flatMap((day) => prev[day] || [])],
+    }));
+    setDays([UNSCHEDULED_DAY]);
+    setSelectedStripIds((prev) => prev.filter((id) => (stripsByDay[UNSCHEDULED_DAY] || []).some((strip) => strip.id === id)));
+    if (editorTarget && editorTarget.day !== UNSCHEDULED_DAY) {
+      setEditorTarget((prev) => (prev ? { ...prev, day: UNSCHEDULED_DAY } : prev));
+      setDraft((prev) => ({ ...prev, day: UNSCHEDULED_DAY, sourceDay: UNSCHEDULED_DAY }));
+    }
+  }
 
   const workbenchLines = useMemo(() => classifySceneLines(draft.scriptText || ""), [draft.scriptText]);
   const workbenchTokens = useMemo(() => workbenchTokenMap(draft), [draft]);
@@ -885,6 +1154,9 @@ export function Stripboard({
         </label>
         <button type="button" onClick={insertDayBreakAfterActive} disabled={!editorTarget}>Add Day Break After Active Scene</button>
         <button type="button" onClick={startFirstShootDayFromUnscheduled} disabled={(stripsByDay[UNSCHEDULED_DAY] ?? []).length === 0}>Start Schedule From Unscheduled</button>
+        <button type="button" onClick={moveAllScheduledToBoneyard} disabled={shootingDays.every((day) => !(stripsByDay[day] || []).length)}>
+          Move All to Boneyard
+        </button>
         <button type="button" onClick={() => setShowUnscheduledPanel((prev) => !prev)}>
           {showUnscheduledPanel ? "Hide Boneyard" : "Show Boneyard"}
         </button>
@@ -895,6 +1167,18 @@ export function Stripboard({
           </button>
         ) : null}
       </div>
+      {conflictSummary.length ? (
+        <div className="conflict-panel">
+          <strong>Conflicts ({conflictSummary.length})</strong>
+          <div className="conflict-list">
+            {conflictSummary.map((item, index) => (
+              <span key={`${item.day}-${item.code}-${index}`} className={item.severity === "high" ? "conflict-chip high" : "conflict-chip medium"}>
+                {item.day}: {item.title}
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       {showWorkbench ? (
         <section className="scene-editor">
@@ -919,47 +1203,28 @@ export function Stripboard({
               </label>
               <label className="field-int-ext">
                 INT/EXT
-                <select value={draft.intExt} onChange={(event) => setDraft((prev) => ({ ...prev, intExt: event.target.value }))}>
+                <select value={draft.intExt} onChange={(event) => setDraft((prev) => ({ ...prev, intExt: event.target.value, heading: buildHeadingFromParts(event.target.value, prev.location, prev.timeOfDay) }))}>
                   {INT_EXT_OPTIONS.map((option) => (<option key={option} value={option}>{option}</option>))}
                 </select>
               </label>
               <label className="field-time-of-day">
                 Time of Day
-                <select value={draft.timeOfDay} onChange={(event) => setDraft((prev) => ({ ...prev, timeOfDay: event.target.value }))}>
+                <select value={draft.timeOfDay} onChange={(event) => setDraft((prev) => ({ ...prev, timeOfDay: event.target.value, heading: buildHeadingFromParts(prev.intExt, prev.location, event.target.value) }))}>
                   {TIME_OPTIONS.map((option) => (<option key={option} value={option}>{option}</option>))}
                 </select>
               </label>
-              <label className="field-heading">
-                Heading
-                <input type="text" value={draft.heading} onChange={(event) => applyHeadingToDraft(event.target.value)} />
+              <label className="field-location">
+                Location
+                <input
+                  type="text"
+                  list="location-suggestions-main"
+                  value={draft.location}
+                  onChange={(event) => {
+                    const location = event.target.value;
+                    setDraft((prev) => ({ ...prev, location, heading: buildHeadingFromParts(prev.intExt, location, prev.timeOfDay) }));
+                  }}
+                />
               </label>
-            </div>
-            <div className="editor-row-secondary">
-              <div className="chip-editor">
-                <div className="chip-editor-header">Location</div>
-                <div className="chip-list">
-                  {draft.location ? (
-                    <button type="button" className="chip" onClick={() => setDraft((prev) => ({ ...prev, location: "" }))}>
-                      {draft.location} <span className="chip-x">x</span>
-                    </button>
-                  ) : (
-                    <span className="chip-empty">None</span>
-                  )}
-                </div>
-                <div className="chip-controls">
-                  <input
-                    type="text"
-                    list="location-suggestions-main"
-                    value={chipInputs.location}
-                    onChange={(event) => setChipInputs((prev) => ({ ...prev, location: event.target.value }))}
-                    placeholder="Set location"
-                  />
-                  <button type="button" onClick={() => setLocation(chipInputs.location)}>Set</button>
-                </div>
-                <datalist id="location-suggestions-main">
-                  {locationSuggestions.map((value) => (<option key={value} value={value} />))}
-                </datalist>
-              </div>
               <label className="field-page-count">
                 Page Count
                 <input type="text" value={draft.pageCount} placeholder="e.g. 2 3/8" onChange={(event) => setDraft((prev) => ({ ...prev, pageCount: event.target.value }))} />
@@ -975,6 +1240,9 @@ export function Stripboard({
                 </select>
               </label>
             </div>
+            <datalist id="location-suggestions-main">
+              {locationSuggestions.map((value) => (<option key={value} value={value} />))}
+            </datalist>
 
             <div className="chip-grid">
               <ChipListEditor title="Cast" values={draft.cast} suggestions={castSuggestions} inputValue={chipInputs.cast} onInputChange={(value) => setChipInputs((prev) => ({ ...prev, cast: value }))} onAdd={(value) => addChip("cast", value)} onRemove={(value) => removeChip("cast", value)} placeholder="Add cast" />
@@ -984,10 +1252,15 @@ export function Stripboard({
               <ChipListEditor title="Sets" values={draft.sets} suggestions={setsSuggestions} inputValue={chipInputs.sets} onInputChange={(value) => setChipInputs((prev) => ({ ...prev, sets: value }))} onAdd={(value) => addChip("sets", value)} onRemove={(value) => removeChip("sets", value)} placeholder="Add set" />
             </div>
 
-            <label>
-              Script Text
-              <textarea className="script-text-area" rows={4} value={draft.scriptText} onChange={(event) => setDraft((prev) => ({ ...prev, scriptText: event.target.value }))} />
-            </label>
+            <div className="notes-stack">
+              <label>
+                Notes
+                <textarea className="notes-text-area" value={draft.notes} onChange={(event) => setDraft((prev) => ({ ...prev, notes: event.target.value }))} />
+              </label>
+              <label className="inline-check">
+                <input type="checkbox" checked={draft.needsReview} onChange={(event) => setDraft((prev) => ({ ...prev, needsReview: event.target.checked }))} /> Needs Review
+              </label>
+            </div>
             <div className="review-line-items">
               <h4>Line Classification + Element Mapper</h4>
               <div className="review-annotate-controls">
@@ -1054,13 +1327,6 @@ export function Stripboard({
                 </div>
               ) : null}
             </div>
-            <label>
-              Notes
-              <textarea value={draft.notes} onChange={(event) => setDraft((prev) => ({ ...prev, notes: event.target.value }))} />
-            </label>
-            <label className="inline-check">
-              <input type="checkbox" checked={draft.needsReview} onChange={(event) => setDraft((prev) => ({ ...prev, needsReview: event.target.checked }))} /> Needs Review
-            </label>
           </form>
           ) : (
             <p className="workbench-collapsed">Workbench minimized.</p>
@@ -1171,31 +1437,55 @@ export function Stripboard({
                   <tbody>
                     <tr
                       className="day-break-row"
-                      onDragOver={(event) => event.preventDefault()}
+                      onDragOver={(event) => {
+                        event.preventDefault();
+                        if (draggedDay) return;
+                        setDropPreviewBefore(UNSCHEDULED_DAY, null, draggedIdsPayload());
+                      }}
                       onDrop={() => {
-                        if (!draggedStrip) return;
-                        moveStrip(draggedStrip.id, UNSCHEDULED_DAY, null);
-                        setDraggedStrip(null);
+                        if (draggedDay) {
+                          clearDragState();
+                          return;
+                        }
+                        const ids = draggedIdsPayload();
+                        if (!ids.length) return;
+                        moveStrips(ids, UNSCHEDULED_DAY, null);
+                        clearDragState();
                       }}
                     >
                       <td colSpan={unscheduledFieldOrder.length}>Boneyard ({unscheduledRows.length})</td>
                     </tr>
                     {unscheduledRows.map((strip) => {
                       const isActive = editorTarget?.id === strip.id;
+                      const isMultiSelected = selectedStripIds.includes(strip.id);
                       return (
+                        <Fragment key={strip.id}>
+                        {dropPreview?.day === UNSCHEDULED_DAY && dropPreview?.beforeId === strip.id ? (
+                          <tr className="drop-placeholder-row">
+                            <td colSpan={unscheduledFieldOrder.length}>Drop here</td>
+                          </tr>
+                        ) : null}
                         <tr
-                          key={strip.id}
-                          className={isActive ? "scene-row selected" : "scene-row"}
+                          className={isActive ? "scene-row selected" : isMultiSelected ? "scene-row multi-selected" : "scene-row"}
                           style={{ ...getStripStyle(strip, colorMode), height: `${rowHeight}px` }}
-                          onClick={() => selectStrip(strip, UNSCHEDULED_DAY)}
+                          onClick={(event) => handleRowClick(event, strip, UNSCHEDULED_DAY, unscheduledRows)}
                           draggable
-                          onDragStart={() => setDraggedStrip({ id: strip.id, day: UNSCHEDULED_DAY })}
-                          onDragEnd={() => setDraggedStrip(null)}
-                          onDragOver={(event) => event.preventDefault()}
+                          onDragStart={(event) => beginStripDrag(event, strip.id, UNSCHEDULED_DAY, isMultiSelected)}
+                          onDragEnd={clearDragState}
+                          onDragOver={(event) => {
+                            event.preventDefault();
+                            if (draggedDay) return;
+                            setDropPreviewBefore(UNSCHEDULED_DAY, strip.id, draggedIdsPayload());
+                          }}
                           onDrop={() => {
-                            if (!draggedStrip) return;
-                            moveStrip(draggedStrip.id, UNSCHEDULED_DAY, strip.id);
-                            setDraggedStrip(null);
+                            if (draggedDay) {
+                              clearDragState();
+                              return;
+                            }
+                            const ids = draggedIdsPayload();
+                            if (!ids.length) return;
+                            moveStrips(ids, UNSCHEDULED_DAY, strip.id);
+                            clearDragState();
                           }}
                         >
                           {unscheduledFieldOrder.map((fieldKey) => (
@@ -1204,8 +1494,14 @@ export function Stripboard({
                             </td>
                           ))}
                         </tr>
+                        </Fragment>
                       );
                     })}
+                    {dropPreview?.day === UNSCHEDULED_DAY && !dropPreview?.beforeId ? (
+                      <tr className="drop-placeholder-row">
+                        <td colSpan={unscheduledFieldOrder.length}>Drop here</td>
+                      </tr>
+                    ) : null}
                   </tbody>
                 </table>
               </section>
@@ -1240,20 +1536,38 @@ export function Stripboard({
                     <Fragment key={`day-group-${block.day}`}>
                       {block.strips.map((strip) => {
                         const isActive = editorTarget?.id === strip.id;
+                        const isMultiSelected = selectedStripIds.includes(strip.id);
                         return (
+                          <Fragment key={strip.id}>
+                          {dropPreview?.day === block.day && dropPreview?.beforeId === strip.id ? (
+                            <tr className="drop-placeholder-row">
+                              <td colSpan={scheduledFieldOrder.length}>Drop here</td>
+                            </tr>
+                          ) : null}
                           <tr
-                            key={strip.id}
-                            className={isActive ? "scene-row selected" : "scene-row"}
+                            className={isActive ? "scene-row selected" : isMultiSelected ? "scene-row multi-selected" : "scene-row"}
                             style={{ ...getStripStyle(strip, colorMode), height: `${rowHeight}px` }}
-                            onClick={() => selectStrip(strip, block.day)}
+                            onClick={(event) => handleRowClick(event, strip, block.day, block.strips)}
                             draggable
-                            onDragStart={() => setDraggedStrip({ id: strip.id, day: block.day })}
-                            onDragEnd={() => setDraggedStrip(null)}
-                            onDragOver={(event) => event.preventDefault()}
+                            onDragStart={(event) => beginStripDrag(event, strip.id, block.day, isMultiSelected)}
+                            onDragEnd={clearDragState}
+                            onDragOver={(event) => {
+                              event.preventDefault();
+                              if (draggedDay) return;
+                              setDropPreviewBefore(block.day, strip.id, draggedIdsPayload());
+                            }}
                             onDrop={() => {
-                              if (!draggedStrip) return;
-                              moveStrip(draggedStrip.id, block.day, strip.id);
-                              setDraggedStrip(null);
+                              if (draggedDay) {
+                                clearDragState();
+                                return;
+                              }
+                              const ids = draggedIdsPayload();
+                              if (!ids.length) return;
+                              moveStrips(ids, block.day, strip.id);
+                              if (ids.includes(editorTarget?.id)) {
+                                setEditorTarget((prev) => (prev ? { ...prev, day: block.day } : prev));
+                              }
+                              clearDragState();
                             }}
                           >
                             {scheduledFieldOrder.map((fieldKey) => (
@@ -1262,23 +1576,54 @@ export function Stripboard({
                               </td>
                             ))}
                           </tr>
+                          </Fragment>
                         );
                       })}
+                      {dropPreview?.day === block.day && !dropPreview?.beforeId ? (
+                        <tr className="drop-placeholder-row">
+                          <td colSpan={scheduledFieldOrder.length}>Drop here</td>
+                        </tr>
+                      ) : null}
                       <tr
                         key={`break-${block.day}`}
-                        className="day-break-row"
-                        onDragOver={(event) => event.preventDefault()}
+                        className={draggedDay && draggedDay !== block.day ? "day-break-row day-break-drop-target" : "day-break-row"}
+                        draggable
+                        onDragStart={(event) => beginDayDrag(event, block.day)}
+                        onDragEnd={clearDragState}
+                        onDragOver={(event) => {
+                          event.preventDefault();
+                          if (draggedDay) return;
+                          setDropPreviewBefore(block.day, null, draggedIdsPayload());
+                        }}
                         onDrop={() => {
-                          if (!draggedStrip) return;
-                          moveStrip(draggedStrip.id, block.day, null);
-                          setDraggedStrip(null);
+                          if (draggedDay) {
+                            reorderShootingDays(draggedDay, block.day);
+                            clearDragState();
+                            return;
+                          }
+                          const ids = draggedIdsPayload();
+                          if (!ids.length) return;
+                          moveStrips(ids, block.day, null);
+                          if (ids.includes(editorTarget?.id)) {
+                            setEditorTarget((prev) => (prev ? { ...prev, day: block.day } : prev));
+                          }
+                          clearDragState();
                         }}
                       >
                         <td colSpan={scheduledFieldOrder.length}>
                           <div className="day-break-content">
-                            <span>
+                            <span className="day-break-meta">
                               End of Day #{block.dayIndex} - {block.day} - {formatPageEighths(block.pageTotal)} pages - {formatMinutes(block.timeTotal)} est.
                             </span>
+                            {block.conflicts?.length ? (
+                              <span className="day-conflict-badges">
+                                {block.conflicts.map((item, idx) => (
+                                  <span key={`${block.day}-${item.code}-${idx}`} className={item.severity === "high" ? "conflict-badge high" : "conflict-badge medium"}>
+                                    {item.code === "cast_load" ? "Cast Load" : item.code === "duplicate_scene" ? "Duplicates" : item.code === "moves" ? "Moves" : "Review"}
+                                  </span>
+                                ))}
+                              </span>
+                            ) : null}
                             <button
                               type="button"
                               className="day-break-delete"

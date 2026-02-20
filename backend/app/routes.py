@@ -83,7 +83,10 @@ async def parse_script(file: UploadFile = File(...)) -> dict:
     if not payload:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 
-    result = parser.parse_pdf(payload, alias_map=get_alias_lookup("cast"))
+    try:
+        result = parser.parse_pdf(payload, alias_map=get_alias_lookup("cast"))
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
     return {
         "filename": filename,
         "scene_count": len(result["scenes"]),

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CastElementsView } from "./components/CastElementsView";
+import { DayOutOfDaysReport } from "./components/DayOutOfDaysReport";
 import { ParseUploader } from "./components/ParseUploader";
 import { SceneReviewMode } from "./components/SceneReviewMode";
 import { Stripboard } from "./components/Stripboard";
@@ -630,7 +631,17 @@ export default function App() {
   }
 
   function startReview(parsedScenes) {
-    setReviewQueue(Array.isArray(parsedScenes) ? parsedScenes : []);
+    const safeScenes = (Array.isArray(parsedScenes) ? parsedScenes : [])
+      .filter((scene) => scene && typeof scene === "object")
+      .map((scene, idx) => ({
+        ...scene,
+        scene_number: Number.isFinite(scene.scene_number) ? scene.scene_number : idx + 1,
+        heading: scene.heading || `SCENE ${idx + 1}`,
+        scene_text: String(scene.scene_text || ""),
+        cast: Array.isArray(scene.cast) ? scene.cast : [],
+        background: Array.isArray(scene.background) ? scene.background : [],
+      }));
+    setReviewQueue(safeScenes);
     setActiveView("review");
   }
 
@@ -842,6 +853,30 @@ export default function App() {
     });
   }
 
+  function reorderShootDaysForActiveSchedule(fromIndex, toIndex) {
+    updateActiveSchedule((schedule) => {
+      const shootingDays = schedule.days.filter((day) => day !== UNSCHEDULED_DAY);
+      if (fromIndex < 0 || toIndex < 0 || fromIndex >= shootingDays.length || toIndex >= shootingDays.length) {
+        return schedule;
+      }
+      const reordered = [...shootingDays];
+      const [picked] = reordered.splice(fromIndex, 1);
+      reordered.splice(toIndex, 0, picked);
+
+      const newDayNames = reordered.map((_, idx) => `Day ${idx + 1}`);
+      const nextStripsByDay = { [UNSCHEDULED_DAY]: [...(schedule.stripsByDay[UNSCHEDULED_DAY] || [])] };
+      reordered.forEach((oldDay, idx) => {
+        nextStripsByDay[newDayNames[idx]] = [...(schedule.stripsByDay[oldDay] || [])];
+      });
+
+      return {
+        ...schedule,
+        days: [UNSCHEDULED_DAY, ...newDayNames],
+        stripsByDay: nextStripsByDay,
+      };
+    });
+  }
+
   function deleteCastEverywhere(castName) {
     const target = String(castName || "").trim().toUpperCase();
     if (!target) return;
@@ -959,7 +994,7 @@ export default function App() {
       </header>
 
       <section className="panel menu-bar-panel">
-        <div className="menu-bar" ref={menuBarRef}>
+        <div className="menu-bar app-menubar" ref={menuBarRef}>
           <details className="menu-group">
             <summary>File</summary>
             <div className="menu-content">
@@ -978,20 +1013,52 @@ export default function App() {
                 </select>
               </label>
               <button type="button" onClick={renameActiveProject}>Rename Project</button>
+              <hr />
+              <label>
+                Schedule Select
+                <select
+                  value={activeSchedule.id}
+                  onChange={(event) => {
+                    const nextScheduleId = event.target.value;
+                    setWorkspace((prev) => {
+                      const projects = prev.projects.map((project) => {
+                        if (project.id !== prev.activeProjectId) {
+                          return project;
+                        }
+                        return { ...project, activeScheduleId: nextScheduleId };
+                      });
+                      return { ...prev, projects };
+                    });
+                  }}
+                >
+                  {activeProject.schedules.map((schedule) => (
+                    <option key={schedule.id} value={schedule.id}>
+                      {schedule.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button type="button" onClick={renameActiveSchedule}>Rename Schedule</button>
+              <button type="button" onClick={duplicateSchedule}>Duplicate Schedule</button>
+              <hr />
               <button type="button" onClick={() => parseUploaderRef.current?.openImport()}>Import Script</button>
               <button type="button" onClick={() => parseUploaderRef.current?.openUpdate()}>Update Script</button>
-              <button type="button" onClick={startReviewFromCurrentSchedule}>Scene Review</button>
-              <button type="button" onClick={seedAndLoadDbWorkspace}>Seed Test Data</button>
-              <button type="button" onClick={loadDbWorkspace}>Load Test Data</button>
               <button type="button" onClick={saveActiveScheduleToDb}>Save Active Schedule to DB</button>
             </div>
           </details>
 
           <details className="menu-group">
-            <summary>Elements</summary>
+            <summary>Edit</summary>
             <div className="menu-content">
+              <button type="button" onClick={startReviewFromCurrentSchedule}>Scene Review</button>
+            </div>
+          </details>
+
+          <details className="menu-group">
+            <summary>View</summary>
+            <div className="menu-content">
+              <button type="button" onClick={() => { setActiveView("schedule"); setReportView("stripboard"); }}>Stripboard</button>
               <button type="button" onClick={() => setActiveView("elements")}>Elements View</button>
-              <button type="button" onClick={() => setActiveView("castElements")}>Cast View</button>
               <button type="button" onClick={() => setActiveView("fullScript")}>Full Script</button>
             </div>
           </details>
@@ -999,38 +1066,19 @@ export default function App() {
           <details className="menu-group">
             <summary>Reports</summary>
             <div className="menu-content">
-              <button type="button" onClick={() => { setActiveView("schedule"); setReportView("stripboard"); }}>Stripboard</button>
               <button type="button" onClick={() => { setActiveView("schedule"); setReportView("dood"); }}>DooD</button>
+              <button type="button" onClick={() => setActiveView("castElements")}>Cast View</button>
               <button type="button" onClick={() => { setActiveView("schedule"); setReportView("character"); }}>Character Report</button>
             </div>
           </details>
 
-          <label className="menu-inline">
-            Schedule
-            <select
-              value={activeSchedule.id}
-              onChange={(event) => {
-                const nextScheduleId = event.target.value;
-                setWorkspace((prev) => {
-                  const projects = prev.projects.map((project) => {
-                    if (project.id !== prev.activeProjectId) {
-                      return project;
-                    }
-                    return { ...project, activeScheduleId: nextScheduleId };
-                  });
-                  return { ...prev, projects };
-                });
-              }}
-            >
-              {activeProject.schedules.map((schedule) => (
-                <option key={schedule.id} value={schedule.id}>
-                  {schedule.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button type="button" onClick={renameActiveSchedule}>Rename Schedule</button>
-          <button type="button" onClick={duplicateSchedule}>Duplicate Schedule</button>
+          <details className="menu-group">
+            <summary>Data</summary>
+            <div className="menu-content">
+              <button type="button" onClick={seedAndLoadDbWorkspace}>Seed Test Data</button>
+              <button type="button" onClick={loadDbWorkspace}>Load Test Data</button>
+            </div>
+          </details>
         </div>
 
         <ParseUploader
@@ -1185,10 +1233,11 @@ export default function App() {
       {activeView === "schedule" ? (
         <section className="panel">
           {reportView === "dood" ? (
-            <div className="report-placeholder">
-              <h3>DooD Report</h3>
-              <p>DooD view scaffold is selected. Scene-day assignment data is ready for report formatting.</p>
-            </div>
+            <DayOutOfDaysReport
+              days={activeSchedule.days}
+              stripsByDay={activeSchedule.stripsByDay}
+              onReorderShootDays={reorderShootDaysForActiveSchedule}
+            />
           ) : null}
           {reportView === "character" ? (
             <div className="report-placeholder">

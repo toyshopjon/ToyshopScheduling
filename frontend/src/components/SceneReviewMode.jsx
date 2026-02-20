@@ -7,7 +7,7 @@ const ELEMENT_TYPES = ["cast", "background", "location", "props", "wardrobe", "s
 function uniqueValues(values) {
   const seen = new Set();
   const next = [];
-  for (const raw of values) {
+  for (const raw of values || []) {
     const value = String(raw || "").trim();
     if (!value) continue;
     const key = value.toUpperCase();
@@ -166,27 +166,28 @@ function buildLineSegments(text, tokenMap) {
 }
 
 function asReviewScene(scene, index) {
-  const predictedCast = uniqueValues(Array.isArray(scene.cast) ? scene.cast : []);
+  const safeScene = scene && typeof scene === "object" ? scene : {};
+  const predictedCast = uniqueValues(Array.isArray(safeScene.cast) ? safeScene.cast : []);
   return {
-    scene_number: scene.scene_number,
-    heading: scene.heading,
-    location: scene.location || "",
-    int_ext: scene.int_ext || inferIntExtFromHeading(scene.heading, "INT"),
-    time_of_day: scene.time_of_day || "DAY",
-    script_text: scene.scene_text || "",
-    line_items: Array.isArray(scene.line_items) ? scene.line_items : [],
+    scene_number: safeScene.scene_number,
+    heading: safeScene.heading || `SCENE ${index + 1}`,
+    location: safeScene.location || "",
+    int_ext: safeScene.int_ext || inferIntExtFromHeading(safeScene.heading, "INT"),
+    time_of_day: safeScene.time_of_day || "DAY",
+    script_text: safeScene.scene_text || "",
+    line_items: Array.isArray(safeScene.line_items) ? safeScene.line_items : [],
     predicted: {
       cast: predictedCast,
       background: [],
-      location: scene.location || "",
+      location: safeScene.location || "",
       props: [],
       wardrobe: [],
       sets: [],
     },
     corrected: {
       cast: predictedCast,
-      background: Array.isArray(scene.background) ? scene.background : [],
-      location: scene.location || "",
+      background: Array.isArray(safeScene.background) ? safeScene.background : [],
+      location: safeScene.location || "",
       props: [],
       wardrobe: [],
       sets: [],
@@ -204,6 +205,44 @@ function asReviewScene(scene, index) {
       props: [],
       wardrobe: [],
       sets: [],
+    },
+  };
+}
+
+function normalizeReviewScene(scene, index) {
+  const base = asReviewScene(scene, index);
+  const source = scene && typeof scene === "object" ? scene : {};
+  return {
+    ...base,
+    ...source,
+    predicted: {
+      ...base.predicted,
+      ...(source.predicted || {}),
+      cast: uniqueValues([...(source.predicted?.cast || base.predicted.cast || [])]),
+      background: uniqueValues([...(source.predicted?.background || base.predicted.background || [])]),
+      props: uniqueValues([...(source.predicted?.props || base.predicted.props || [])]),
+      wardrobe: uniqueValues([...(source.predicted?.wardrobe || base.predicted.wardrobe || [])]),
+      sets: uniqueValues([...(source.predicted?.sets || base.predicted.sets || [])]),
+    },
+    corrected: {
+      ...base.corrected,
+      ...(source.corrected || {}),
+      cast: uniqueValues([...(source.corrected?.cast || base.corrected.cast || [])]),
+      background: uniqueValues([...(source.corrected?.background || base.corrected.background || [])]),
+      props: uniqueValues([...(source.corrected?.props || base.corrected.props || [])]),
+      wardrobe: uniqueValues([...(source.corrected?.wardrobe || base.corrected.wardrobe || [])]),
+      sets: uniqueValues([...(source.corrected?.sets || base.corrected.sets || [])]),
+      notes: String(source.corrected?.notes ?? base.corrected.notes ?? ""),
+    },
+    suppressed: {
+      ...base.suppressed,
+      ...(source.suppressed || {}),
+      cast: uniqueValues([...(source.suppressed?.cast || [])]),
+      background: uniqueValues([...(source.suppressed?.background || [])]),
+      location: uniqueValues([...(source.suppressed?.location || [])]),
+      props: uniqueValues([...(source.suppressed?.props || [])]),
+      wardrobe: uniqueValues([...(source.suppressed?.wardrobe || [])]),
+      sets: uniqueValues([...(source.suppressed?.sets || [])]),
     },
   };
 }
@@ -240,7 +279,11 @@ function ChipListEditor({ title, values, onAdd, onRemove, suggestions = [], inpu
 }
 
 export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeedback }) {
-  const [scenes, setScenes] = useState(() => parsedScenes.map((scene, index) => asReviewScene(scene, index)));
+  const [scenes, setScenes] = useState(() =>
+    Array.from(parsedScenes || [])
+      .filter((scene) => scene && typeof scene === "object")
+      .map((scene, sceneIndex) => normalizeReviewScene(scene, sceneIndex))
+  );
   const [index, setIndex] = useState(0);
   const [splitError, setSplitError] = useState("");
   const [inputs, setInputs] = useState({ cast: "", background: "", location: "", props: "", wardrobe: "", sets: "" });
@@ -249,7 +292,7 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
   const [selectionPreview, setSelectionPreview] = useState("");
   const [contextMenu, setContextMenu] = useState({ open: false, x: 0, y: 0, text: "" });
 
-  const current = scenes[index];
+  const current = normalizeReviewScene(scenes[index], index);
 
   function renumberFromIndex(nextScenes, startIndex, startNumber) {
     const safeStart = Math.max(0, Number.parseInt(String(startNumber), 10) || 1);
@@ -268,12 +311,13 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
     const sets = new Set();
 
     for (let i = 0; i <= index; i += 1) {
-      for (const name of scenes[i].corrected.cast) cast.add(name);
-      for (const item of scenes[i].corrected.background) background.add(item);
-      if (scenes[i].corrected.location) locations.add(scenes[i].corrected.location);
-      for (const item of scenes[i].corrected.props) props.add(item);
-      for (const item of scenes[i].corrected.wardrobe) wardrobe.add(item);
-      for (const item of scenes[i].corrected.sets) sets.add(item);
+      const scene = normalizeReviewScene(scenes[i], i);
+      for (const name of scene.corrected.cast || []) cast.add(name);
+      for (const item of scene.corrected.background || []) background.add(item);
+      if (scene.corrected.location) locations.add(scene.corrected.location);
+      for (const item of scene.corrected.props || []) props.add(item);
+      for (const item of scene.corrected.wardrobe || []) wardrobe.add(item);
+      for (const item of scene.corrected.sets || []) sets.add(item);
     }
 
     return {
@@ -500,26 +544,27 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
   }
 
   async function saveFeedbackFor(scene) {
+    const safeScene = normalizeReviewScene(scene, index);
     await onSaveFeedback?.({
-      scene_number: Number(scene.scene_number) || 0,
-      heading: scene.heading,
-      script_text: scene.script_text,
-      predicted_cast_csv: toCsv(scene.predicted.cast),
-      corrected_cast_csv: toCsv(scene.corrected.cast),
-      predicted_background_csv: toCsv(scene.predicted.background),
-      corrected_background_csv: toCsv(scene.corrected.background),
-      predicted_location: scene.predicted.location,
-      corrected_location: scene.corrected.location,
-      predicted_props_csv: toCsv(scene.predicted.props),
-      corrected_props_csv: toCsv(scene.corrected.props),
-      predicted_wardrobe_csv: toCsv(scene.predicted.wardrobe),
-      corrected_wardrobe_csv: toCsv(scene.corrected.wardrobe),
-      predicted_sets_csv: toCsv(scene.predicted.sets),
-      corrected_sets_csv: toCsv(scene.corrected.sets),
-      manual_split: Boolean(scene.manual_split),
-      split_parent_scene_number: Number(scene.split_parent_scene_number) || 0,
-      split_parent_heading: scene.split_parent_heading || "",
-      split_selected_text: scene.split_selected_text || "",
+      scene_number: Number(safeScene.scene_number) || 0,
+      heading: safeScene.heading,
+      script_text: safeScene.script_text,
+      predicted_cast_csv: toCsv(safeScene.predicted.cast),
+      corrected_cast_csv: toCsv(safeScene.corrected.cast),
+      predicted_background_csv: toCsv(safeScene.predicted.background),
+      corrected_background_csv: toCsv(safeScene.corrected.background),
+      predicted_location: safeScene.predicted.location,
+      corrected_location: safeScene.corrected.location,
+      predicted_props_csv: toCsv(safeScene.predicted.props),
+      corrected_props_csv: toCsv(safeScene.corrected.props),
+      predicted_wardrobe_csv: toCsv(safeScene.predicted.wardrobe),
+      corrected_wardrobe_csv: toCsv(safeScene.corrected.wardrobe),
+      predicted_sets_csv: toCsv(safeScene.predicted.sets),
+      corrected_sets_csv: toCsv(safeScene.corrected.sets),
+      manual_split: Boolean(safeScene.manual_split),
+      split_parent_scene_number: Number(safeScene.split_parent_scene_number) || 0,
+      split_parent_heading: safeScene.split_parent_heading || "",
+      split_selected_text: safeScene.split_selected_text || "",
     });
   }
 
@@ -527,7 +572,7 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
     setScenes((prev) => {
       if (nextIndex < 0 || nextIndex >= prev.length) return prev;
       const next = [...prev];
-      const target = next[nextIndex];
+      const target = normalizeReviewScene(next[nextIndex], nextIndex);
       const existing = new Set(target.corrected.cast.map(normalizeName));
 
       for (const candidate of knownElements.cast) {
@@ -561,21 +606,24 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
   async function finishReview() {
     await saveFeedbackFor(scenes[index]);
     onComplete(
-      scenes.map((scene) => ({
-        scene_number: Number(scene.scene_number) || 0,
-        heading: scene.heading,
-        location: scene.corrected.location,
-        int_ext: scene.int_ext,
-        time_of_day: scene.time_of_day,
-        cast: scene.corrected.cast,
-        background: scene.corrected.background,
-        props: scene.corrected.props,
-        wardrobe: scene.corrected.wardrobe,
-        sets: scene.corrected.sets,
-        notes: scene.corrected.notes,
-        scene_text: scene.script_text,
-        source_order: scene.source_order,
-      }))
+      scenes.map((scene, sceneIndex) => {
+        const safeScene = normalizeReviewScene(scene, sceneIndex);
+        return {
+          scene_number: Number(safeScene.scene_number) || 0,
+          heading: safeScene.heading,
+          location: safeScene.corrected.location,
+          int_ext: safeScene.int_ext,
+          time_of_day: safeScene.time_of_day,
+          cast: safeScene.corrected.cast,
+          background: safeScene.corrected.background,
+          props: safeScene.corrected.props,
+          wardrobe: safeScene.corrected.wardrobe,
+          sets: safeScene.corrected.sets,
+          notes: safeScene.corrected.notes,
+          scene_text: safeScene.script_text,
+          source_order: safeScene.source_order,
+        };
+      })
     );
   }
 
