@@ -290,7 +290,7 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
   const scriptTextRef = useRef(null);
   const lineMapperRef = useRef(null);
   const [selectionPreview, setSelectionPreview] = useState("");
-  const [contextMenu, setContextMenu] = useState({ open: false, x: 0, y: 0, text: "" });
+  const [contextMenu, setContextMenu] = useState({ open: false, x: 0, y: 0, text: "", lineIndex: null });
 
   const current = normalizeReviewScene(scenes[index], index);
 
@@ -640,12 +640,21 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
     setSelectionPreview(getSelectionFromLineMapper());
   }
 
-  function openElementTypeMenu(event, explicitText = "") {
+  function openElementTypeMenu(event, explicitText = "", options = {}) {
     const candidate = normalizeSelection(explicitText || getSelectionFromLineMapper());
-    if (!candidate) return;
+    const lineIndex = Number.isInteger(options?.lineIndex) ? options.lineIndex : null;
+    if (!candidate && lineIndex === null) return;
     event.preventDefault();
-    setSelectionPreview(candidate);
-    setContextMenu({ open: true, x: event.clientX, y: event.clientY, text: candidate });
+    if (candidate) {
+      setSelectionPreview(candidate);
+    }
+    setContextMenu({
+      open: true,
+      x: event.clientX,
+      y: event.clientY,
+      text: candidate || normalizeSelection(options?.lineText || ""),
+      lineIndex,
+    });
   }
 
   function addFromContextMenu(type) {
@@ -658,11 +667,11 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
     }
     window.getSelection?.().removeAllRanges();
     setSelectionPreview("");
-    setContextMenu({ open: false, x: 0, y: 0, text: "" });
+    setContextMenu({ open: false, x: 0, y: 0, text: "", lineIndex: null });
   }
 
   function closeContextMenu() {
-    setContextMenu((prev) => (prev.open ? { open: false, x: 0, y: 0, text: "" } : prev));
+    setContextMenu((prev) => (prev.open ? { open: false, x: 0, y: 0, text: "", lineIndex: null } : prev));
   }
 
   useEffect(() => {
@@ -681,6 +690,71 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
   }, [contextMenu.open]);
 
   function clearSelectionAndContext() {
+    setSelectionPreview("");
+    closeContextMenu();
+  }
+
+  function splitSceneAtLine(lineIndex) {
+    const splitAt = Number.parseInt(String(lineIndex), 10);
+    const fullText = String(current.script_text || "");
+    const lines = fullText.split("\n");
+    if (!Number.isFinite(splitAt) || splitAt <= 0 || splitAt >= lines.length) {
+      setSplitError("Choose a line inside the scene to split.");
+      closeContextMenu();
+      return;
+    }
+
+    const beforeText = lines.slice(0, splitAt).join("\n");
+    const afterText = lines.slice(splitAt).join("\n");
+    if (!afterText.trim()) {
+      setSplitError("The new scene would be empty. Choose a different split line.");
+      closeContextMenu();
+      return;
+    }
+
+    const nextHeading = deriveHeadingFromSelectedText(afterText, `${current.heading} (Split)`);
+    const nextLocation = inferLocationFromHeading(nextHeading, current.corrected.location || current.location || "");
+    const nextTimeOfDay = inferTimeFromHeading(nextHeading, current.time_of_day || "DAY");
+    const nextIntExt = inferIntExtFromHeading(nextHeading, current.int_ext || "INT");
+    const castCandidates = uniqueValues([...current.corrected.cast, ...knownElements.cast]).filter((name) =>
+      containsName(afterText, name)
+    );
+
+    setScenes((prev) => {
+      const next = [...prev];
+      const safeCurrent = normalizeReviewScene(next[index], index);
+      const sourceLineItems = Array.isArray(safeCurrent.line_items) ? safeCurrent.line_items : [];
+      const splitScene = {
+        ...asReviewScene(
+          {
+            scene_number: safeCurrent.scene_number,
+            heading: nextHeading,
+            location: nextLocation,
+            int_ext: nextIntExt,
+            time_of_day: nextTimeOfDay,
+            scene_text: afterText,
+            cast: castCandidates,
+            line_items: sourceLineItems.slice(splitAt),
+          },
+          index + 1
+        ),
+        manual_split: true,
+        split_parent_scene_number: Number(safeCurrent.scene_number) || 0,
+        split_parent_heading: safeCurrent.heading,
+        split_selected_text: lines[splitAt] || "",
+      };
+
+      next[index] = {
+        ...safeCurrent,
+        script_text: beforeText,
+        line_items: sourceLineItems.slice(0, splitAt),
+      };
+      next.splice(index + 1, 0, splitScene);
+      const renumbered = renumberFromIndex(next, index, Number(next[index].scene_number) || 1);
+      return renumbered.map((scene, sceneIndex) => ({ ...scene, source_order: sceneIndex }));
+    });
+
+    setSplitError("");
     setSelectionPreview("");
     closeContextMenu();
   }
@@ -871,7 +945,11 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
             {current.line_items.map((item, lineIndex) => {
               const segments = buildLineSegments(item.text || "", parserElementMap);
               return (
-                <div key={`${current.scene_number}-${lineIndex}`} className="review-line-row">
+                <div
+                  key={`${current.scene_number}-${lineIndex}`}
+                  className="review-line-row"
+                  onContextMenu={(event) => openElementTypeMenu(event, "", { lineIndex, lineText: item.text || "" })}
+                >
                   <span className={`review-line-type review-type-${item.type || "action"}`}>{item.type || "action"}</span>
                   <div className="review-line-text">
                     {segments.map((segment, segmentIndex) => {
@@ -892,6 +970,14 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
                       );
                     })}
                   </div>
+                  <button
+                    type="button"
+                    className="review-line-split"
+                    onClick={() => splitSceneAtLine(lineIndex)}
+                    title="Split scene at this line"
+                  >
+                    Split
+                  </button>
                 </div>
               );
             })}
@@ -904,6 +990,11 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
             onClick={(event) => event.stopPropagation()}
           >
             <div className="review-context-title">{contextMenu.text}</div>
+            {Number.isInteger(contextMenu.lineIndex) ? (
+              <button type="button" onClick={() => splitSceneAtLine(contextMenu.lineIndex)}>
+                Split Scene Here
+              </button>
+            ) : null}
             {ELEMENT_TYPES.map((type) => (
               <button key={type} type="button" onClick={() => addFromContextMenu(type)}>
                 Add as {type === "location" ? "Location" : type}
@@ -915,7 +1006,7 @@ export function SceneReviewMode({ parsedScenes, onComplete, onCancel, onSaveFeed
 
       <div className="review-hint">
         <p><strong>Predicted cast:</strong> {toCsv(current.predicted.cast) || "None"}</p>
-        <p>Select text in the script below, then click <strong>Create Scene From Selection</strong> to split a missed scene.</p>
+        <p>Right-click a line in the mapper and choose <strong>Split Scene Here</strong>, or use <strong>Create Scene From Selection</strong>.</p>
       </div>
 
       <div className="review-mistakes">

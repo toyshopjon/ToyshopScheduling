@@ -173,6 +173,188 @@ function getDayTotalMinutes(strips = []) {
   return strips.reduce((total, strip) => total + (Number.isFinite(strip.estTimeMinutes) ? strip.estTimeMinutes : 0), 0);
 }
 
+function normalizedLocation(strip) {
+  return String(strip?.location || strip?.heading || "").trim().toUpperCase();
+}
+
+function sceneElementSet(strip) {
+  const values = [
+    ...(Array.isArray(strip?.cast) ? strip.cast : []),
+    ...(Array.isArray(strip?.background) ? strip.background : []),
+    ...(Array.isArray(strip?.props) ? strip.props : []),
+    ...(Array.isArray(strip?.wardrobe) ? strip.wardrobe : []),
+    ...(Array.isArray(strip?.sets) ? strip.sets : []),
+    strip?.intExt || "",
+    strip?.timeOfDay || "",
+  ];
+  return new Set(values.map((item) => String(item || "").trim().toUpperCase()).filter(Boolean));
+}
+
+function similarityScore(a, b) {
+  const setA = sceneElementSet(a);
+  const setB = sceneElementSet(b);
+  let score = 0;
+  for (const value of setA) {
+    if (setB.has(value)) score += 1;
+  }
+  return score;
+}
+
+function sceneSortNumber(strip) {
+  const n = Number.parseInt(String(strip?.sceneNumber ?? ""), 10);
+  return Number.isFinite(n) ? n : Number.MAX_SAFE_INTEGER;
+}
+
+function buildLocationOrderedStrips(strips = []) {
+  const byLocation = new Map();
+  for (const strip of strips) {
+    const key = normalizedLocation(strip) || "UNKNOWN";
+    if (!byLocation.has(key)) byLocation.set(key, []);
+    byLocation.get(key).push(strip);
+  }
+
+  const locationKeys = Array.from(byLocation.keys()).sort((a, b) => a.localeCompare(b));
+  const ordered = [];
+
+  for (const key of locationKeys) {
+    const pool = [...(byLocation.get(key) || [])];
+    pool.sort((a, b) => {
+      const aScene = sceneSortNumber(a);
+      const bScene = sceneSortNumber(b);
+      if (aScene !== bScene) return aScene - bScene;
+      return String(a?.id || "").localeCompare(String(b?.id || ""));
+    });
+
+    if (!pool.length) continue;
+    const grouped = [pool.shift()];
+    while (pool.length) {
+      const anchor = grouped[grouped.length - 1];
+      let bestIndex = 0;
+      let bestScore = -1;
+      for (let i = 0; i < pool.length; i += 1) {
+        const score = similarityScore(anchor, pool[i]);
+        if (score > bestScore) {
+          bestScore = score;
+          bestIndex = i;
+        }
+      }
+      grouped.push(pool.splice(bestIndex, 1)[0]);
+    }
+    ordered.push(...grouped);
+  }
+
+  return ordered;
+}
+
+function getStripEighths(strip) {
+  const value = Number.isFinite(strip?.pageEighths) ? strip.pageEighths : 1;
+  return Math.max(1, Number(value || 1));
+}
+
+function buildLocationBatches(orderedStrips = []) {
+  const byLocation = [];
+  let currentKey = null;
+  let current = [];
+  for (const strip of orderedStrips) {
+    const key = normalizedLocation(strip) || "UNKNOWN";
+    if (currentKey === null || key === currentKey) {
+      currentKey = key;
+      current.push(strip);
+    } else {
+      byLocation.push({ key: currentKey, strips: current });
+      currentKey = key;
+      current = [strip];
+    }
+  }
+  if (current.length) byLocation.push({ key: currentKey || "UNKNOWN", strips: current });
+
+  const MIN_DAY_EIGHTHS = 32; // 4 pages
+  const MAX_DAY_EIGHTHS = 64; // 8 pages
+  const dayBatches = [];
+
+  for (const group of byLocation) {
+    const strips = group.strips || [];
+    const groupTotal = strips.reduce((sum, strip) => sum + getStripEighths(strip), 0);
+    if (!strips.length) continue;
+
+    // Rule: if location total is <= 8 pages, keep it all on one day.
+    if (groupTotal <= MAX_DAY_EIGHTHS) {
+      dayBatches.push({ location: group.key, strips: [...strips] });
+      continue;
+    }
+
+    let cursor = 0;
+    while (cursor < strips.length) {
+      let batchTotal = 0;
+      const batch = [];
+      while (cursor < strips.length) {
+        const strip = strips[cursor];
+        const nextEighths = getStripEighths(strip);
+        const wouldExceed = batchTotal + nextEighths > MAX_DAY_EIGHTHS;
+        if (wouldExceed && batch.length > 0 && batchTotal >= MIN_DAY_EIGHTHS) break;
+        if (wouldExceed && batch.length > 0) break;
+        batch.push(strip);
+        batchTotal += nextEighths;
+        cursor += 1;
+        if (batchTotal >= MAX_DAY_EIGHTHS) break;
+      }
+      dayBatches.push({ location: group.key, strips: batch });
+    }
+
+    // Rebalance short trailing batch (<4 pages) within same location when possible.
+    for (let i = dayBatches.length - 1; i > 0; i -= 1) {
+      const curr = dayBatches[i];
+      const prev = dayBatches[i - 1];
+      if (!curr || !prev || curr.location !== group.key || prev.location !== group.key) continue;
+      let currTotal = curr.strips.reduce((sum, strip) => sum + getStripEighths(strip), 0);
+      let prevTotal = prev.strips.reduce((sum, strip) => sum + getStripEighths(strip), 0);
+      while (currTotal < MIN_DAY_EIGHTHS && prev.strips.length > 1) {
+        const candidate = prev.strips[prev.strips.length - 1];
+        const candidateEighths = getStripEighths(candidate);
+        if (prevTotal - candidateEighths < MIN_DAY_EIGHTHS) break;
+        prev.strips.pop();
+        curr.strips.unshift(candidate);
+        prevTotal -= candidateEighths;
+        currTotal += candidateEighths;
+      }
+    }
+  }
+
+  return dayBatches.filter((batch) => batch.strips.length);
+}
+
+function enforceMinimumDayPages(batches = []) {
+  const MIN_DAY_EIGHTHS = 32; // 4 pages
+  const next = batches
+    .filter((batch) => Array.isArray(batch?.strips) && batch.strips.length)
+    .map((batch) => ({ ...batch, strips: [...batch.strips] }));
+
+  if (next.length <= 1) return next;
+
+  function batchTotal(batch) {
+    return (batch?.strips || []).reduce((sum, strip) => sum + getStripEighths(strip), 0);
+  }
+
+  // Force minimum by folding short days into neighbors.
+  for (let i = next.length - 1; i >= 0; i -= 1) {
+    const total = batchTotal(next[i]);
+    if (total >= MIN_DAY_EIGHTHS) continue;
+
+    if (i > 0) {
+      next[i - 1].strips.push(...next[i].strips);
+      next.splice(i, 1);
+      continue;
+    }
+
+    if (next.length > 1) {
+      next[1].strips = [...next[0].strips, ...next[1].strips];
+      next.splice(0, 1);
+    }
+  }
+
+  return next;
+}
+
 function formatConflictMinutes(totalMinutes) {
   const safe = Math.max(0, Number.isFinite(totalMinutes) ? totalMinutes : 0);
   const h = Math.floor(safe / 60);
@@ -654,6 +836,55 @@ export function Stripboard({
       [UNSCHEDULED_DAY]: [],
       [nextDayName]: [...(prev[nextDayName] ?? []), ...unscheduled],
     }));
+  }
+
+  function autoScheduleAll() {
+    const allStrips = days.flatMap((day) => stripsByDay[day] || []);
+    if (!allStrips.length) return;
+
+    const ordered = buildLocationOrderedStrips(allStrips);
+    const batches = enforceMinimumDayPages(buildLocationBatches(ordered));
+    if (!batches.length) return;
+
+    const dayNames = batches.map((_, index) => `Day ${index + 1}`);
+    const nextByDay = { [UNSCHEDULED_DAY]: [] };
+    dayNames.forEach((name, index) => {
+      nextByDay[name] = [...batches[index].strips];
+    });
+
+    setDays([UNSCHEDULED_DAY, ...dayNames]);
+    setStripsByDay(nextByDay);
+    setDropPreview(null);
+    setDraggedDay("");
+    setDraggedStrip(null);
+    setSelectedStripIds([]);
+
+    if (editorTarget?.id) {
+      let foundDay = "";
+      for (const day of dayNames) {
+        if ((nextByDay[day] || []).some((strip) => strip.id === editorTarget.id)) {
+          foundDay = day;
+          break;
+        }
+      }
+      if (foundDay) {
+        setEditorTarget((prev) => (prev ? { ...prev, day: foundDay } : prev));
+      }
+    }
+  }
+
+  function moveStripsToScheduleEnd(stripIds) {
+    const ids = Array.from(new Set((stripIds || []).filter(Boolean)));
+    if (!ids.length) return;
+    const existingShootingDays = days.filter((day) => day !== UNSCHEDULED_DAY);
+    if (!existingShootingDays.length) {
+      const nextDayName = uniqueDayName(days);
+      setDays((prev) => [UNSCHEDULED_DAY, ...prev.filter((day) => day !== UNSCHEDULED_DAY), nextDayName]);
+      moveStrips(ids, nextDayName, null);
+      return;
+    }
+    const lastDay = existingShootingDays[existingShootingDays.length - 1];
+    moveStrips(ids, lastDay, null);
   }
 
   function selectStrip(strip, day) {
@@ -1154,6 +1385,7 @@ export function Stripboard({
         </label>
         <button type="button" onClick={insertDayBreakAfterActive} disabled={!editorTarget}>Add Day Break After Active Scene</button>
         <button type="button" onClick={startFirstShootDayFromUnscheduled} disabled={(stripsByDay[UNSCHEDULED_DAY] ?? []).length === 0}>Start Schedule From Unscheduled</button>
+        <button type="button" onClick={autoScheduleAll} disabled={stripCount === 0}>Auto Schedule</button>
         <button type="button" onClick={moveAllScheduledToBoneyard} disabled={shootingDays.every((day) => !(stripsByDay[day] || []).length)}>
           Move All to Boneyard
         </button>
@@ -1531,7 +1763,37 @@ export function Stripboard({
                     ))}
                   </tr>
                 </thead>
-                <tbody>
+                <tbody
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    if (draggedDay) return;
+                    const ids = draggedIdsPayload();
+                    if (!ids.length) return;
+                    const existingShootingDays = days.filter((day) => day !== UNSCHEDULED_DAY);
+                    const targetDay = existingShootingDays.length ? existingShootingDays[existingShootingDays.length - 1] : "__new_day__";
+                    setDropPreviewBefore(targetDay, null, ids);
+                  }}
+                  onDrop={() => {
+                    if (draggedDay) {
+                      clearDragState();
+                      return;
+                    }
+                    const ids = draggedIdsPayload();
+                    if (!ids.length) return;
+                    moveStripsToScheduleEnd(ids);
+                    if (ids.includes(editorTarget?.id)) {
+                      const existingShootingDays = days.filter((day) => day !== UNSCHEDULED_DAY);
+                      const nextEditorDay = existingShootingDays.length ? existingShootingDays[existingShootingDays.length - 1] : "Day 1";
+                      setEditorTarget((prev) => (prev ? { ...prev, day: nextEditorDay } : prev));
+                    }
+                    clearDragState();
+                  }}
+                >
+                  {!stackedDayBlocks.length ? (
+                    <tr className="drop-placeholder-row">
+                      <td colSpan={scheduledFieldOrder.length}>Drop strips here to create Day 1</td>
+                    </tr>
+                  ) : null}
                   {stackedDayBlocks.map((block) => (
                     <Fragment key={`day-group-${block.day}`}>
                       {block.strips.map((strip) => {
@@ -1640,6 +1902,9 @@ export function Stripboard({
                       </tr>
                     </Fragment>
                   ))}
+                  <tr className="schedule-bottom-spacer" aria-hidden="true">
+                    <td colSpan={scheduledFieldOrder.length} />
+                  </tr>
                 </tbody>
               </table>
             </section>
